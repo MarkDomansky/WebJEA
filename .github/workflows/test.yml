@@ -1,0 +1,55 @@
+name: Tests
+# Builds and packages WebJEA without releasing. Skipped for docs-only changes:
+# nothing in them affects the build. Test/Unit is deliberately NOT ignored - a
+# change to the unit tests is exactly what this workflow exists to validate.
+on:
+  push:
+    branches: [master, '2026.x', beta, beta-2026, alpha]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE'
+      - 'LICENSE-attributions'
+      - '.vscode/**'
+      - '.github/instructions/**'
+      - 'Test/Integration/**'
+      - 'Test/Dev/**'
+      - 'Test/Scripts/**'
+  pull_request:
+    # Work lands as squash-merged PRs into a release line (alpha for the
+    # rewrite, beta-2026 for VB.NET hotfixes); master and beta only receive
+    # promotion merges. See CONTRIBUTING.md.
+    branches: [master, '2026.x', beta, beta-2026, alpha]
+    # Keep in sync with the push filter above (Actions does not support YAML
+    # anchors, so this has to be repeated).
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE'
+      - 'LICENSE-attributions'
+      - '.vscode/**'
+      - '.github/instructions/**'
+      - 'Test/Integration/**'
+      - 'Test/Dev/**'
+      - 'Test/Scripts/**'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build WebJEA
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - uses: nuget/setup-nuget@v2
+      - name: Build and package
+        shell: pwsh
+        env:
+          AWS_KEY: ${{ secrets.AWS_KEY }}
+          AWS_KEYSEC: ${{ secrets.AWS_KEYSEC }}
+          AWS_QUEUE_URL: ${{ secrets.AWS_QUEUE_URL }}
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'build-output'
+          & "$env:GITHUB_WORKSPACE\.github\workflows\build.ps1" -OutputPath $out -BuildConfiguration Release | Out-Null

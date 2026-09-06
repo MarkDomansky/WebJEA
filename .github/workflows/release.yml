@@ -1,0 +1,165 @@
+name: Release
+# version -> build -> publish. semantic-release decides the next version from
+# the commits on the branch that was pushed; the build job stamps that version
+# into the app and produces webjea-<version>.zip; only then does semantic-release
+# create the tag and the GitHub release with the zip attached. Nothing is tagged
+# and nothing appears on the releases page unless the build is green.
+#
+# The CHANNEL comes from the branch that was pushed, per .releaserc.cjs:
+#
+#   alpha     -> 2100.0.0-alpha.N   (rewrite; every squash-merged PR lands here)
+#   beta      -> 2100.0.0-beta.N    (rewrite staging; fed by merging alpha)
+#   master    -> GA                 (2026.9.x today, 2100.x once beta is merged)
+#   beta-2026 -> 2026.9.x-rc.N      (hotfix staging for the shipping VB.NET app)
+#   2026.x    -> 2026.9.x GA        (VB.NET maintenance line, once master is 2100)
+#
+# Promote with a real merge commit, never a squash - the analyzer needs the
+# individual conventional commits to pick the bump. See CONTRIBUTING.md.
+on:
+  push:
+    branches:
+      - master
+      - '2026.x'
+      - beta
+      - beta-2026
+      - alpha
+    # Docs and the manual/integration test harness do not ship in the zip, so a
+    # push that only touches them cuts no release. A push that also touches
+    # anything else still runs (paths-ignore only skips when *every* changed
+    # file matches). Those commits are not lost - they are folded into the notes
+    # of the next release that does run. Use workflow_dispatch to force one.
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE'
+      - 'LICENSE-attributions'
+      - '.vscode/**'
+      - '.github/instructions/**'
+      - 'Test/Integration/**'
+      - 'Test/Dev/**'
+      - 'Test/Scripts/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+# semantic-release refuses to run when the local branch is behind the remote,
+# so releases on the SAME branch must not overlap. Different branches are
+# independent release lines and may run concurrently.
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Determine Version
+    runs-on: ubuntu-latest
+    outputs:
+      # 'true' when the commits since the last tag warrant a release on this
+      # branch. 'false' on a branch this repo does not release from.
+      publish: ${{ steps.semantic.outputs.new_release_published }}
+      # Bare semver, e.g. 2026.9.1 or 2100.0.0-alpha.1 (no leading v).
+      version: ${{ steps.semantic.outputs.new_release_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: semantic-release (dry run)
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          semantic_version: 24
+          dry_run: true
+          # Required by `preset: conventionalcommits` in .releaserc.cjs. Keep in
+          # sync with the publish job, or the two runs could disagree.
+          extra_plugins: |
+            conventional-changelog-conventionalcommits@8
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Report decision
+        run: |
+          if [ "${{ steps.semantic.outputs.new_release_published }}" = "true" ]; then
+            echo "::notice::Next release: v${{ steps.semantic.outputs.new_release_version }}"
+          else
+            echo "::notice::No release warranted for these commits - skipping build."
+          fi
+
+  build:
+    name: Build WebJEA
+    needs: version
+    if: needs.version.outputs.publish == 'true'
+    runs-on: windows-latest
+    env:
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - uses: nuget/setup-nuget@v2
+      - name: Build and package
+        shell: pwsh
+        env:
+          AWS_KEY: ${{ secrets.AWS_KEY }}
+          AWS_KEYSEC: ${{ secrets.AWS_KEYSEC }}
+          AWS_QUEUE_URL: ${{ secrets.AWS_QUEUE_URL }}
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'build-output'
+          $result = & "$env:GITHUB_WORKSPACE\.github\workflows\build.ps1" -OutputPath $out -BuildConfiguration Release -Version $env:RELEASE_VERSION
+          if ("$($result.Version)" -ne $env:RELEASE_VERSION) {
+            throw "build.ps1 stamped '$($result.Version)' but semantic-release computed '$env:RELEASE_VERSION'."
+          }
+          # build-info.json is a build-side artifact, not part of the package.
+          Remove-Item (Join-Path $out 'build-info.json') -ErrorAction Ignore
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $zip = "dist/webjea-$env:RELEASE_VERSION.zip"
+          Compress-Archive -Path "$out/*" -DestinationPath $zip -Force
+          Get-Item $zip | Select-Object Name, Length
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-dist
+          path: dist/webjea-*.zip
+          if-no-files-found: error
+          # Consumed by `publish` in this run; the week is a debug window. The
+          # published release keeps the zip permanently.
+          retention-days: 7
+
+  publish:
+    name: Tag and Publish Release
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # semantic-release needs the full history to reach the last tag.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+          path: dist/
+      # Same analysis as the `version` job on the same commit, so it lands on
+      # the same version - but this run creates the tag, generates the notes and
+      # uploads dist/* to the release on this branch's channel.
+      - name: semantic-release (tag + publish)
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          semantic_version: 24
+          # Keep in sync with the version job.
+          extra_plugins: |
+            conventional-changelog-conventionalcommits@8
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify published version matches the built artifact
+        run: |
+          EXPECTED="${{ needs.version.outputs.version }}"
+          ACTUAL="${{ steps.semantic.outputs.new_release_version }}"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::Published v$ACTUAL but the build produced v$EXPECTED."
+            exit 1
+          fi
+          echo "::notice::Published v$ACTUAL"
