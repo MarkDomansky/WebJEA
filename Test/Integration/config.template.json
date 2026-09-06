@@ -43,14 +43,14 @@
     "Deployment": {
         "_comment": "Paths on the target VM for deployment",
         "ExtractPath": "C:\\Deploy",
-        "SettingsFileName": "settings.conf",
-        "_comment2": "Path on the VM where settings.conf should be copied from (local to script runner)",
-        "LocalSettingsPath": ".\\settings.conf"
+        "SettingsFileName": "settings.jsonc",
+        "_comment2": "Path on the VM where settings.jsonc should be copied from (local to script runner)",
+        "LocalSettingsPath": ".\\settings.jsonc"
     },
 
     "WebServer": {
         "_comment": "Web server configuration for integration tests",
-        "BaseUrl": "https://web1.domain1.local/WebJEA",
+        "BaseUrl": "https://web1.domain1.local",
         "FQDN": "web1.domain1.local",
         "_comment2": "Set to true to ignore SSL certificate errors (self-signed certs)",
         "IgnoreSslErrors": true,

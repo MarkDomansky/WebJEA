@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>WebJEA</RootNamespace>
+    <AssemblyName>WebJEA</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <!-- Content items are listed explicitly so only wwwroot, appsettings, and
+         NLog.config ship in the publish output. -->
+    <EnableDefaultContentItems>false</EnableDefaultContentItems>
+    <!-- No IIS hosting: don't generate the ASP.NET Core Module web.config on publish. -->
+    <IsTransformWebConfigDisabled>true</IsTransformWebConfigDisabled>
+    <!-- The build passes -p:Version (from semantic-release in CI). Keep the
+         informational version exactly that string: the SDK would otherwise append
+         "+<commit sha>", which the UI version badge does not want. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="WebJEA.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="appsettings*.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="NLog.config" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="wwwroot\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AWSSDK.SQS" Version="4.0.3.3" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="10.0.*" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.*" />
+    <PackageReference Include="Microsoft.Identity.Web" Version="3.*" />
+    <PackageReference Include="Microsoft.Identity.Web.GraphServiceClient" Version="3.*" />
+    <PackageReference Include="Microsoft.PowerShell.SDK" Version="7.6.*" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageReference Include="NLog.Web.AspNetCore" Version="6.1.3" />
+    <PackageReference Include="System.DirectoryServices.AccountManagement" Version="10.0.*" />
+    <PackageReference Include="System.Management" Version="10.0.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- CI generates Telemetry\AwsSecrets.cs from the template; when it is absent
+         (e.g. local dev), the template's placeholder values compile instead. -->
+    <Compile Remove="Telemetry\AwsSecrets.template.cs" />
+    <Compile Include="Telemetry\AwsSecrets.template.cs" Condition="!Exists('$(MSBuildProjectDirectory)\Telemetry\AwsSecrets.cs')" />
+  </ItemGroup>
+
+</Project>

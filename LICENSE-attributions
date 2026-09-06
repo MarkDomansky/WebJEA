@@ -1,11 +1,78 @@
-﻿Special thanks goes to the authors of the included components below.  These 
-components have been included in the release for convenience and are copyright 
-by their respective owners and have their own licenses which may affect your 
-authorized use of this software:
-NLOG
-Bootstrap
-JQuery
-jQuery-UI
-jQuery-Timepicker
-Newtonsoft JSON
-AWSSDK
+Special thanks goes to the authors of the included components below.  These
+components are redistributed with WebJEA for convenience.  They are copyright
+their respective owners and are governed by their own licenses, which may
+affect your authorized use of this software.
+
+WebJEA itself is licensed under the GPL v3 (see the LICENSE file).
+
+================================================================================
+Server-side components (.NET / NuGet packages redistributed as assemblies)
+================================================================================
+
+AWSSDK.SQS
+  AWS SDK for .NET
+  Copyright Amazon.com, Inc. or its affiliates.
+  Apache License 2.0
+  https://github.com/aws/aws-sdk-net/blob/main/License.txt
+
+Microsoft.AspNetCore.Authentication.Negotiate
+  Copyright (c) .NET Foundation and Contributors
+  MIT License
+  https://github.com/dotnet/aspnetcore/blob/main/LICENSE.txt
+
+Microsoft.Identity.Web
+Microsoft.Identity.Web.GraphServiceClient
+  Copyright (c) Microsoft Corporation
+  MIT License
+  https://github.com/AzureAD/microsoft-identity-web/blob/master/LICENSE
+
+Microsoft.PowerShell.SDK
+  PowerShell 7
+  Copyright (c) Microsoft Corporation
+  MIT License
+  https://github.com/PowerShell/PowerShell/blob/master/LICENSE.txt
+
+Newtonsoft.Json (Json.NET)
+  Copyright (c) James Newton-King
+  MIT License
+  https://github.com/JamesNK/Newtonsoft.Json/blob/master/LICENSE.md
+
+NLog / NLog.Web.AspNetCore
+  Copyright (c) Jaroslaw Kowalski and NLog Contributors
+  BSD 3-Clause License
+  https://github.com/NLog/NLog/blob/master/LICENSE.txt
+
+System.DirectoryServices.AccountManagement
+System.Management
+  Copyright (c) .NET Foundation and Contributors
+  MIT License
+  https://github.com/dotnet/runtime/blob/main/LICENSE.TXT
+
+================================================================================
+Client-side components (JavaScript / CSS redistributed under wwwroot/)
+================================================================================
+
+jQuery 3.7.1
+  Copyright OpenJS Foundation and other contributors
+  MIT License
+  https://github.com/jquery/jquery/blob/main/LICENSE.txt
+
+jQuery UI 1.14.1
+  Copyright OpenJS Foundation and other contributors
+  MIT License
+  https://github.com/jquery/jquery-ui/blob/main/LICENSE.txt
+
+jQuery Timepicker Addon 1.6.3 (includes jQuery UI Slider Access)
+  Copyright (c) Trent Richardson
+  MIT License
+  https://github.com/trentrichardson/jQuery-Timepicker-Addon/blob/master/MIT-LICENSE.txt
+
+Bootstrap 5.3.8
+  Copyright (c) The Bootstrap Authors
+  MIT License
+  https://github.com/twbs/bootstrap/blob/main/LICENSE
+
+DOMPurify 3.4.10
+  Copyright (c) Cure53 and other contributors
+  Dual licensed under the Apache License 2.0 and the Mozilla Public License 2.0
+  https://github.com/cure53/DOMPurify/blob/main/LICENSE

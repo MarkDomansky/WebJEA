@@ -1,0 +1,34 @@
+# WebJEA on Linux containers. Run from this folder:
+#   docker compose up -d
+#
+# Put your config.json and scripts in ./scripts before starting (see
+# docs/docker.md). Linux hosting requires Entra ID authentication.
+services:
+  webjea:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: webjea:latest
+    ports:
+      - "8080:8080"
+    environment:
+      Authentication__Mode: Entra
+      AzureAd__TenantId: "<tenant-guid>"
+      AzureAd__ClientId: "<client-id>"
+      AzureAd__ClientSecret: "<client-secret>"
+      # Enable only when the container itself terminates TLS (see docs/docker.md);
+      # with a TLS-terminating reverse proxy in front, leave these off. Configure the
+      # certificate via standard Kestrel settings, NOT WebJEA__HttpsPort - that
+      # setting is Windows-service-only (it loads a cert by thumbprint from the
+      # Windows LocalMachine\My store, which doesn't exist on Linux, and throws at
+      # startup without WebJEA__CertThumbprint, crash-looping the container). There is
+      # no built-in HTTP->HTTPS redirect in this path (see docs/docker.md) - front a
+      # TLS-terminating reverse proxy instead if you need one.
+      # ASPNETCORE_URLS: "https://+:8443;http://+:8080"
+      # Kestrel__Certificates__Default__Path: /https/webjea.pfx
+      # Kestrel__Certificates__Default__Password: "<pfx-password>"
+    volumes:
+      - ./scripts:/webjea/scripts
+      - ./logs:/webjea/logs
+      # - ./certs:/https:ro   # only needed for the direct-TLS example above
+    restart: unless-stopped

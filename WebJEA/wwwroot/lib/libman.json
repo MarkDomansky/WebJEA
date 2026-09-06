@@ -1,0 +1,11 @@
+{
+  "_comment": "Provenance of vendored third-party assets (previously delivered via NuGet content packages). Update files in place and record the new version here.",
+  "version": "1.0",
+  "defaultProvider": "cdnjs",
+  "libraries": [
+    { "library": "jquery@3.7.1", "files": [ "jquery.min.js" ] },
+    { "library": "jqueryui@1.14.1", "files": [ "jquery-ui.min.js", "themes/base/jquery-ui.min.css", "themes/base/images/*" ] },
+    { "library": "jquery-timepicker-addon@1.6.3", "files": [ "jquery-ui-timepicker-addon.min.js", "jquery-ui-timepicker-addon.min.css", "jquery-ui-sliderAccess.js" ] },
+    { "library": "bootstrap@5.3.8", "files": [ "bootstrap.bundle.min.js", "bootstrap.min.css" ] }
+  ]
+}

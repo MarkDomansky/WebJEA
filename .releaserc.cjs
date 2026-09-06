@@ -96,7 +96,7 @@ module.exports = {
         assets: [{ path: 'dist/webjea-*.zip' }],
         releaseNameTemplate: 'WebJEA <%= nextRelease.version %>',
         releaseBodyTemplate:
-          '<%= nextRelease.notes %>\n\n[Installation Guide](https://github.com/markdomansky/WebJEA/wiki/Installation)',
+          '<%= nextRelease.notes %>\n\n[Installation Guide](https://github.com/markdomansky/WebJEA/blob/master/docs/Installation.md)',
         successComment: false,
         failComment: false,
         labels: false,

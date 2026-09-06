@@ -12,7 +12,7 @@ Properties {
 # ---------------------------------------------------------------------------
 #  Shared tasks
 # ---------------------------------------------------------------------------
-
+#
 Task Init {
     $script:configPath = $ConfigPath
     $script:helpersPath = $helpersPath
@@ -327,22 +327,6 @@ Task ResolveSettings -Depends Init {
     Assert (Test-Path $settingsSourcePath) "Settings file not found: $settingsSourcePath"
     $script:settingsSourcePath = $settingsSourcePath
     Write-Log "Using settings file: $settingsSourcePath"
-
-    $script:deployMode = if ($script:config.Deployment.Mode) { $script:config.Deployment.Mode } else { 'Root' }
-    Write-Log "Deployment mode: $script:deployMode"
-
-    if ($script:deployMode -eq 'Both')
-    {
-        $subPath = $script:config.Deployment.SubModuleLocalSettingsPath
-        Assert $subPath "Deployment.SubModuleLocalSettingsPath is required when Mode is 'Both'"
-        if (-not [System.IO.Path]::IsPathRooted($subPath))
-        {
-            $subPath = Join-Path (Split-Path $script:configPath) $subPath
-        }
-        Assert (Test-Path $subPath) "Sub-module settings file not found: $subPath"
-        $script:subModuleSettingsSourcePath = $subPath
-        Write-Log "Using sub-module settings file: $subPath"
-    }
 }
 
 Task StageDeployment -Depends GetCredential, StartVMs, ResolveBuildPackage, ResolveSettings {
@@ -404,22 +388,10 @@ Task StageDeployment -Depends GetCredential, StartVMs, ResolveBuildPackage, Reso
         Copy-Item -Path $script:settingsSourcePath -Destination $vmSettingsPath -ToSession $session -Force
         Write-Log 'Settings file copied successfully' -Level Success
 
-        # Transfer sub-module settings if deploying Both
-        $vmSubModuleSettingsPath = $null
-        if ($script:deployMode -eq 'Both')
-        {
-            $subSettingsFileName = $script:config.Deployment.SubModuleSettingsFileName
-            Assert $subSettingsFileName "Deployment.SubModuleSettingsFileName is required when Mode is 'Both'"
-            $vmSubModuleSettingsPath = Join-Path $vmExtractPath $subSettingsFileName
-            Write-Log 'Copying sub-module settings file to VM...'
-            Copy-Item -Path $script:subModuleSettingsSourcePath -Destination $vmSubModuleSettingsPath -ToSession $session -Force
-            Write-Log 'Sub-module settings file copied successfully' -Level Success
-        }
-
         # Extract package and locate Deploy.ps1 on VM
         Write-Log 'Extracting deployment package on VM...'
         $staged = Invoke-Command -Session $session -ScriptBlock {
-            param($DeployFolder, $ZipPath, $SettingsPath, $SettingsFileName, $SubModuleSettingsPath, $SubModuleSettingsFileName, $DeployMode)
+            param($DeployFolder, $ZipPath, $SettingsPath, $SettingsFileName)
             $ErrorActionPreference = 'Stop'
 
             Write-Host "Extracting $ZipPath to $DeployFolder"
@@ -435,24 +407,14 @@ Task StageDeployment -Depends GetCredential, StartVMs, ResolveBuildPackage, Reso
             Write-Host "Copying settings file $SettingsPath to $targetSettingsPath"
             Copy-Item -Path $SettingsPath -Destination $targetSettingsPath -Force
 
-            $targetSubPath = $null
-            if ($DeployMode -eq 'Both')
-            {
-                $targetSubPath = Join-Path $deployRoot $SubModuleSettingsFileName
-                Write-Host "Copying sub-module settings file $SubModuleSettingsPath to $targetSubPath"
-                Copy-Item -Path $SubModuleSettingsPath -Destination $targetSubPath -Force
-            }
-
             return @{
-                DeployRoot              = $deployRoot
-                SettingsPath            = $targetSettingsPath
-                SubModuleSettingsPath   = $targetSubPath
+                DeployRoot   = $deployRoot
+                SettingsPath = $targetSettingsPath
             }
-        } -ArgumentList $vmDeployFolder, $vmZipPath, $vmSettingsPath, $script:config.Deployment.SettingsFileName, $vmSubModuleSettingsPath, $script:config.Deployment.SubModuleSettingsFileName, $script:deployMode
+        } -ArgumentList $vmDeployFolder, $vmZipPath, $vmSettingsPath, $script:config.Deployment.SettingsFileName
 
-        $script:stagedDeployRoot            = $staged.DeployRoot
-        $script:stagedSettingsPath          = $staged.SettingsPath
-        $script:stagedSubModuleSettingsPath = $staged.SubModuleSettingsPath
+        $script:stagedDeployRoot   = $staged.DeployRoot
+        $script:stagedSettingsPath = $staged.SettingsPath
 
         if ($script:quickBuild) {
             Write-Log 'Quick Build: Overriding ReleaseFiles in VM deploy root...'
@@ -840,6 +802,13 @@ Task GetTestCredentials -Depends Init {
 
 Task ConfigureSsl -Depends Init -PreCondition { $script:config.WebServer.IgnoreSslErrors } {
     Write-Log 'Configuring to ignore SSL certificate errors'
+    if ($PSVersionTable.PSEdition -eq 'Core')
+    {
+        #pwsh's Invoke-WebRequest ignores ServicePointManager.CertificatePolicy; the
+        #tests read WebServer.IgnoreSslErrors themselves and pass -SkipCertificateCheck.
+        Write-Log 'PowerShell 7+: tests will use -SkipCertificateCheck'
+        return
+    }
     if (-not ([System.Management.Automation.PSTypeName]'TrustAllCertsPolicy').Type)
     {
         Add-Type @'

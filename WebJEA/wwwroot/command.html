@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html id="htmlRoot" lang="en-US">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- favicon info -->
+    <link rel="apple-touch-icon" sizes="180x180" href="resources/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="resources/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="resources/favicon-16x16.png" />
+    <link rel="manifest" href="resources/site.webmanifest" />
+
+    <title>WebJEA</title>
+
+    <link href="lib/bootstrap.min.css" rel="stylesheet" />
+    <link href="lib/themes/base/jquery-ui.min.css" rel="stylesheet" />
+    <link href="lib/jquery-ui-timepicker-addon.min.css" rel="stylesheet" />
+
+    <link href="resources/command.css" rel="stylesheet" />
+    <link href="resources/main.css" rel="stylesheet" />
+    <link href="resources/psoutput.css" rel="stylesheet" />
+</head>
+<body class="bg-light">
+    <div id="app" class="mode-cmd">
+
+        <!-- ── MOBILE TOPBAR (shown below lg in command mode) ── -->
+        <div id="mobile-topbar">
+            <button class="btn btn-outline-secondary btn-sm" type="button" id="btnToggleSidebar" aria-label="Toggle navigation">
+                <span aria-hidden="true">&#9776;</span>
+            </button>
+            <span id="lblTitle" class="site-name"></span>
+        </div>
+
+        <!-- ── LAYOUT WRAPPER ── -->
+        <div id="layout">
+            <div id="overlay"></div>
+
+            <!-- ── SIDEBAR ── -->
+            <div id="sidebar">
+                <!-- Brand -->
+                <div id="sidebar-brand">
+                    <span id="lblTitleDesktop"></span>
+                </div>
+
+                <!-- Sub-nav with Dashboard link -->
+                <div id="sidebar-subnav">
+                    <a class="nav-item-link" href="./">Dashboard<span class="nav-tip">Return to the dashboard</span></a>
+                </div>
+
+                <!-- Scrollable menu -->
+                <div id="nav-list"></div>
+
+                <!-- Sidebar footer -->
+                <div id="sidebar-footer">
+                    <div class="footer">Powered by&nbsp;<a href="http://www.webjea.com" target="_blank" class="WebJEALink">WebJEA</a>&nbsp;<span id="lblVersion"></span>.</div>
+                </div>
+            </div>
+
+            <!-- ── MAIN CONTENT ── -->
+            <div id="main">
+                <div id="scroll-area">
+                    <div role="main" id="divCmdBody">
+                        <div class="page-header">
+                            <h1 id="lblCmdTitle" class="h3 fw-bold"></h1>
+                        </div>
+
+                        <div class="accordion collapse" id="SynopsisAndDescription">
+                            <div class="accordion-item">
+                                <h2 class="accordion-header">
+                                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#flush-collapseOne" aria-expanded="false" aria-controls="flush-collapseOne">
+                                        <span id="lblCmdSynopsis"></span>
+                                    </button>
+                                </h2>
+                                <div id="flush-collapseOne" class="accordion-collapse collapse" data-bs-parent="#SynopsisAndDescription">
+                                    <div class="accordion-body">
+                                        <span id="lblCmdDescription"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card card-body mb-3 collapse" id="divSingleInfo">
+                            <span id="lblSingleInfo"></span>
+                        </div>
+
+                        <div id="panelOnload" class="">
+                            <div class="card psouter">
+                                <div id="consoleOnload" class="ps"></div>
+                            </div>
+                        </div>
+
+                        <div class="card" id="panelInput">
+                            <div class="card-body">
+                                <div id="divParameters"></div>
+                                <button class="btn btn-primary" id="btnRun" type="button">Submit</button><span id="imgLoader"><span id="imgLoaderSVG"></span></span>
+                            </div>
+                        </div>
+
+                        <div class="collapse" id="panelOutput">
+                            <div class="card psouter">
+                                <span id="consoleOutput" class="ps"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div><!-- /layout -->
+
+    </div><!-- /app -->
+
+    <!-- jQuery (necessary for Bootstrap's JavaScript plugins) -->
+    <script src="lib/jquery.min.js"></script>
+    <script src="lib/jquery-ui.min.js"></script>
+    <script src="lib/jquery-ui-sliderAccess.js"></script>
+    <script src="lib/jquery-ui-timepicker-addon.min.js"></script>
+    <script src="lib/bootstrap.bundle.min.js"></script>
+
+    <!-- webjea output parser -->
+    <script src="resources/purify.min.js"></script>
+    <script src="resources/PSWebParser.js"></script>
+
+    <!-- webjea form + validation -->
+    <script src="resources/validation.js"></script>
+    <script src="resources/form-renderer.js"></script>
+
+    <!-- webjea startup -->
+    <script src="resources/startup.js"></script>
+    <script src="resources/app.js" data-page="command"></script>
+</body>
+</html>

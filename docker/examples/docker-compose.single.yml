@@ -1,0 +1,25 @@
+# Single WebJEA instance.
+#
+#   1. Build the image from the repo root:  docker build -f docker/Dockerfile -t webjea .
+#   2. Create an Entra app registration (docs/entra.md) and fill in the .env values
+#      referenced below (TENANT_ID, CLIENT_ID, WEBJEA_CLIENT_SECRET).
+#   3. Put your config.json + scripts in ./scripts
+#   4. docker compose -f docker-compose.single.yml up -d
+#
+# Linux containers are Entra-only (Windows/AD auth needs a Windows host).
+services:
+  webjea:
+    image: webjea:latest
+    ports:
+      - "8080:8080"            # front this with your TLS-terminating proxy in production
+    environment:
+      Authentication__Mode: Entra
+      AzureAd__Instance: https://login.microsoftonline.com/
+      AzureAd__TenantId: ${TENANT_ID}
+      AzureAd__ClientId: ${CLIENT_ID}
+      AzureAd__ClientSecret: ${WEBJEA_CLIENT_SECRET}
+      AzureAd__CallbackPath: /signin-oidc
+    volumes:
+      - ./scripts:/webjea/scripts
+      - ./logs:/webjea/logs
+    restart: unless-stopped

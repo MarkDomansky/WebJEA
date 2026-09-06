@@ -1,0 +1,43 @@
+# WebJEA on Windows containers. Run from this folder on a Windows host in
+# Windows-container mode:
+#   docker compose -f docker-compose.windows.yml up -d
+#
+# Put your config.json and scripts in .\scripts before starting (see
+# docs/docker.md).
+#
+# Windows (Negotiate) authentication requires the container to run with a gMSA
+# credential spec: create one with the CredentialSpec PowerShell module
+# (New-CredentialSpec), then uncomment security_opt below. Without a credential
+# spec, switch to Entra ID authentication (see the environment block).
+services:
+  webjea:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.windows
+    image: webjea:windows
+    ports:
+      - "8080:8080"
+    # The image defaults to Windows (Negotiate) authentication, matching the IIS
+    # install. Uncomment for Entra ID authentication (no gMSA required), or to
+    # terminate TLS in the container itself. Configure the certificate via standard
+    # Kestrel settings, NOT WebJEA__HttpsPort - that setting is Windows-service-only
+    # (it loads a cert by thumbprint from the LocalMachine\My store on the HOST
+    # running the WebJEA.exe service, not inside a container, and throws at startup
+    # without WebJEA__CertThumbprint, crash-looping the container). There is no
+    # built-in HTTP->HTTPS redirect in this path (see docs/docker.md) - front a
+    # TLS-terminating reverse proxy instead if you need one.
+    # environment:
+    #   Authentication__Mode: Entra
+    #   AzureAd__TenantId: "<tenant-guid>"
+    #   AzureAd__ClientId: "<client-id>"
+    #   AzureAd__ClientSecret: "<client-secret>"
+    #   ASPNETCORE_URLS: "https://+:8443;http://+:8080"
+    #   Kestrel__Certificates__Default__Path: C:\https\webjea.pfx
+    #   Kestrel__Certificates__Default__Password: "<pfx-password>"
+    # security_opt:
+    #   - "credentialspec=file://webjea-gmsa.json"
+    volumes:
+      - .\scripts:C:\webjea\scripts
+      - .\logs:C:\webjea\logs
+      # - .\certs:C:\https:ro   # only needed for the direct-TLS example above
+    restart: unless-stopped

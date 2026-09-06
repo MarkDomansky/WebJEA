@@ -1,0 +1,58 @@
+# Multiple WebJEA instances ("sub-sites") behind nginx path routing - the container
+# replacement for the old IIS sub-application installs.
+#
+#   https://host/hr/      -> webjea-hr      (its own scripts, logs, and Entra app)
+#   https://host/finance/ -> webjea-finance
+#
+# Each instance is fully independent: its own scripts volume, its own credentials,
+# its own Entra app registration (so each can carry different Graph permissions and
+# each redirect URI is https://host/<prefix>/signin-oidc).
+#
+# Scaling: to run N replicas of one instance, add `deploy: { replicas: N }` under that
+# service (Swarm) or `docker compose up --scale webjea-hr=3`. Session state is
+# in-memory per container, so the nginx upstreams below use ip_hash (sticky sessions)
+# - required as soon as any instance has more than one replica.
+#
+# Host-based routing alternative: give each instance its own hostname
+# (hr.webjea.corp.com) with a plain `server { proxy_pass ... }` per name and drop
+# WebJEA__PathBase entirely - simpler if you control DNS.
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8080:8080"            # terminate TLS here (add certs + listen 443 ssl) in production
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - webjea-hr
+      - webjea-finance
+
+  webjea-hr:
+    image: webjea:latest
+    environment:
+      WebJEA__PathBase: /hr
+      Authentication__Mode: Entra
+      AzureAd__Instance: https://login.microsoftonline.com/
+      AzureAd__TenantId: ${TENANT_ID}
+      AzureAd__ClientId: ${HR_CLIENT_ID}
+      AzureAd__ClientSecret: ${HR_CLIENT_SECRET}
+      AzureAd__CallbackPath: /signin-oidc
+    volumes:
+      - ./hr/scripts:/webjea/scripts
+      - ./hr/logs:/webjea/logs
+    restart: unless-stopped
+
+  webjea-finance:
+    image: webjea:latest
+    environment:
+      WebJEA__PathBase: /finance
+      Authentication__Mode: Entra
+      AzureAd__Instance: https://login.microsoftonline.com/
+      AzureAd__TenantId: ${TENANT_ID}
+      AzureAd__ClientId: ${FINANCE_CLIENT_ID}
+      AzureAd__ClientSecret: ${FINANCE_CLIENT_SECRET}
+      AzureAd__CallbackPath: /signin-oidc
+    volumes:
+      - ./finance/scripts:/webjea/scripts
+      - ./finance/logs:/webjea/logs
+    restart: unless-stopped

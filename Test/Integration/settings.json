@@ -1,0 +1,14 @@
+{
+    "ServiceName": "WebJEA",
+    "SiteFQDNs": [ "webtest.domain1.local" ],
+    "ServiceUserName": "domain1\\gmsatest$",
+    "ServicePassword": "",
+    "HttpPort": 80,
+    "HttpsPort": 443,
+    "CertThumbprint": "6DD6897F3D1F22EA2B4D4FEC3681F9B56B4C29BB",
+    "SitePath": "C:\\webjea\\site",
+    "ScriptsPath": "c:\\webjea",
+    "LogPath": "c:\\webjea",
+    "LogFile": "webjea.log",
+    "LogUsageFile": "webjea-usage.log"
+}

@@ -96,9 +96,15 @@ jobs:
       RELEASE_VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - uses: microsoft/setup-msbuild@v2
-      - uses: nuget/setup-nuget@v2
-      - name: Build and package
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+      # build.ps1 restores, compiles with -p:Version, runs xUnit + Jest, and
+      # publishes the self-contained win-x64 site into the output folder.
+      - name: Build, test and package
         shell: pwsh
         env:
           AWS_KEY: ${{ secrets.AWS_KEY }}

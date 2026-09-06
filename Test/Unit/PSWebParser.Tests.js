@@ -1,6 +1,6 @@
 'use strict';
 
-const { escapeHtml, sanitizeUrl, isSafeCssClass, processTagMarkup } = require('../../WebJEA/resources/PSWebParser.js');
+const { escapeHtml, sanitizeUrl, isSafeCssClass, processTagMarkup } = require('../../WebJEA/wwwroot/resources/PSWebParser.js');
 
 // ── escapeHtml ────────────────────────────────────────────────────────────────
 

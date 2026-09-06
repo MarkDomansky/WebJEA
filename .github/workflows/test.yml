@@ -42,9 +42,14 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: microsoft/setup-msbuild@v2
-      - uses: nuget/setup-nuget@v2
-      - name: Build and package
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+      # build.ps1 restores, compiles, runs xUnit + Jest, and publishes the site.
+      - name: Build, test and package
         shell: pwsh
         env:
           AWS_KEY: ${{ secrets.AWS_KEY }}

@@ -42,6 +42,13 @@ BeforeAll {
     $script:Credential = $Credential
     $script:UseDefaultCredentials = ($null -eq $Credential -or $Credential -eq [PSCredential]::Empty)
 
+    # Under Windows PowerShell 5.1 the psake ConfigureSsl task installs a
+    # ServicePointManager trust-all policy; pwsh's HttpClient-based Invoke-WebRequest
+    # ignores that, so apply -SkipCertificateCheck to every Invoke-WebRequest instead.
+    if ($Config.WebServer.IgnoreSslErrors -and $PSVersionTable.PSEdition -eq 'Core') {
+        $PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
+    }
+
     function Invoke-WebJEARequest {
         [CmdletBinding()]
         param(

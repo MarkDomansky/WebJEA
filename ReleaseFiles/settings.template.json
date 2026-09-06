@@ -1,0 +1,15 @@
+{
+    "needhelp?": "https://github.com/markdomansky/webjea/blob/master/docs/Installation.md",
+    "ServiceName": "WebJEA",
+    "HttpPort": 80,
+    "HttpsPort": 443,
+    "SiteFQDNs": [ "webtest.example.com" ],
+    "CertThumbprint": "Add your Thumbprint here",
+    "ServiceUserName": "domain\\gmsaname$",
+    "ServicePassword": "",
+    "LogFile": "webjea.log",
+    "LogUsageFile": "webjea-usage.log",
+    "LogPath": "c:\\webjea",
+    "ScriptsPath": "c:\\webjea\\scripts",
+    "SitePath": "C:\\webjea\\site"
+}

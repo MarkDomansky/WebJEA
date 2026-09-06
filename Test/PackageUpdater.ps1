@@ -176,6 +176,65 @@ begin
         end {}
     }
 
+    function GetPackageVulnerabilities
+    {
+        <#
+        .SYNOPSIS
+            Returns an array of known vulnerability IDs for a specific package version by
+            querying the OSV API. Prefers CVE aliases over OSV/GHSA IDs. Returns an empty
+            array when the version is clean or if the API call fails (a warning is logged on
+            failure so the caller knows the check was inconclusive).
+        #>
+        [CmdletBinding()]
+        param (
+            [Parameter(Mandatory)]
+            [string]$PackageId,
+
+            [Parameter(Mandatory)]
+            [string]$Version,
+
+            [Parameter(Mandatory)]
+            [ValidateSet('NuGet', 'npm')]
+            [string]$Ecosystem
+        )
+        begin {}
+        process
+        {
+            $body = @{
+                version = $Version
+                package = @{
+                    name      = $PackageId
+                    ecosystem = $Ecosystem
+                }
+            } | ConvertTo-Json -Compress
+
+            try
+            {
+                $response = Invoke-RestMethod -Uri 'https://api.osv.dev/v1/query' -Method Post `
+                    -ContentType 'application/json' -Body $body -ErrorAction Stop -Verbose:$false
+            }
+            catch
+            {
+                Write-Log -Message "OSV vulnerability check failed for $PackageId $Version; vulnerability status is unknown: $_" -Level Warning
+                return @()
+            }
+
+            if ($null -eq $response.vulns -or $response.vulns.Count -eq 0)
+            {
+                return @()
+            }
+
+            $ids = foreach ($vuln in $response.vulns)
+            {
+                $cveAlias = $vuln.aliases | Where-Object { $_ -match '^CVE-' } | Select-Object -First 1
+                if ($null -ne $cveAlias) { $cveAlias } else { $vuln.id }
+            }
+
+            return @($ids)
+        }
+        end {}
+    }
+
     function GetNugetVersionAge
     {
         <#
@@ -221,8 +280,11 @@ begin
     {
         <#
         .SYNOPSIS
-            Returns the newest stable NuGet version of a package that is both newer than
-            CurrentVersion and at least MinAgeHours old. Returns $null if none qualifies.
+            Returns a PSCustomObject describing the best eligible NuGet update, or $null if
+            none qualifies. Selects the newest stable version at least MinAgeHours old as the
+            initial candidate, then walks forward through newer versions until finding one with
+            no known vulnerabilities. Properties: Version [string], AgeRuleBypassed [bool],
+            CurrentVersionVulnerabilities [string[]], TargetVersionVulnerabilities [string[]].
         #>
         [CmdletBinding()]
         param (
@@ -245,22 +307,23 @@ begin
             }
             catch
             {
-                Write-Log -Message "Failed to query NuGet index for $PackageId`: $_" -Stream Warning
+                Write-Log -Message "Failed to query NuGet index for $PackageId`: $_" -Level Warning
                 return $null
             }
 
             $allVersions = if ($null -ne $index.versions) { @($index.versions) } else { @() }
             $currentParsed = ParseNugetVersion -VersionString $CurrentVersion
 
-            $candidates = $allVersions |
+            $stableNewer = $allVersions |
                 Where-Object { $null -ne $_ -and (IsStableVersion -VersionString $_) } |
                 Where-Object {
                     $v = ParseNugetVersion -VersionString $_
                     ($null -ne $v -and $null -ne $currentParsed -and $v -gt $currentParsed)
-                } |
-                Sort-Object -Property { ParseNugetVersion -VersionString $_ } -Descending
+                }
 
-            foreach ($candidate in $candidates)
+            # Find the initial candidate: newest version satisfying the age rule
+            $initialCandidate = $null
+            foreach ($candidate in ($stableNewer | Sort-Object -Property { ParseNugetVersion -VersionString $_ } -Descending))
             {
                 Write-Log -Message "  Checking age of $PackageId $candidate"
                 $ageHours = GetNugetVersionAge -PackageId $PackageId -Version $candidate
@@ -271,12 +334,59 @@ begin
                 }
                 if ($ageHours -ge $MinAgeHours)
                 {
-                    return $candidate
+                    $initialCandidate = $candidate
+                    break
                 }
                 Write-Log -Message "  $PackageId $candidate is $([math]::Round($ageHours, 1))h old (need $MinAgeHours); skipping"
             }
 
-            return $null
+            if ($null -eq $initialCandidate)
+            {
+                return $null
+            }
+
+            $currentVulns = @(GetPackageVulnerabilities -PackageId $PackageId -Version $CurrentVersion -Ecosystem 'NuGet')
+
+            # Walk forward from the initial candidate (ascending) to find a vulnerability-free version
+            $initialParsed = ParseNugetVersion -VersionString $initialCandidate
+            $candidatesAscending = @($stableNewer |
+                Where-Object {
+                    $v = ParseNugetVersion -VersionString $_
+                    ($null -ne $v -and $v -ge $initialParsed)
+                } |
+                Sort-Object -Property { ParseNugetVersion -VersionString $_ })
+
+            $bestVersion = $initialCandidate
+            $bestVulns = @()
+
+            foreach ($candidate in $candidatesAscending)
+            {
+                Write-Log -Message "  Checking vulnerabilities for $PackageId $candidate"
+                $vulns = @(GetPackageVulnerabilities -PackageId $PackageId -Version $candidate -Ecosystem 'NuGet')
+                $bestVersion = $candidate
+                $bestVulns = $vulns
+
+                if ($vulns.Count -eq 0)
+                {
+                    break
+                }
+
+                $vulnNoun = if ($vulns.Count -eq 1) { 'vulnerability' } else { 'vulnerabilities' }
+                Write-Log -Message "  $PackageId $candidate has $($vulns.Count) known $vulnNoun ($($vulns -join ', ')); trying newer version" -Level Warning
+            }
+
+            if ($bestVulns.Count -gt 0)
+            {
+                $vulnNoun = if ($bestVulns.Count -eq 1) { 'vulnerability' } else { 'vulnerabilities' }
+                Write-Log -Message "  No vulnerability-free version found for $PackageId; best available is $bestVersion with $($bestVulns.Count) known $vulnNoun" -Level Warning
+            }
+
+            return [PSCustomObject]@{
+                Version                       = $bestVersion
+                AgeRuleBypassed               = ($bestVersion -ne $initialCandidate)
+                CurrentVersionVulnerabilities = $currentVulns
+                TargetVersionVulnerabilities  = $bestVulns
+            }
         }
         end {}
     }
@@ -485,9 +595,11 @@ begin
     {
         <#
         .SYNOPSIS
-            Queries the NPM registry for dompurify and returns the latest stable version
-            that is newer than CurrentVersion (when supplied) and at least MinAgeHours old.
-            Returns $null if none qualifies.
+            Queries the NPM registry for dompurify and returns a PSCustomObject describing
+            the best eligible update, or $null if none qualifies. Selects the newest stable
+            version at least MinAgeHours old as the initial candidate, then walks forward
+            through newer versions until finding one with no known vulnerabilities. The
+            returned object has the same shape as GetEligibleNugetVersion's return value.
         #>
         [CmdletBinding()]
         param (
@@ -508,30 +620,31 @@ begin
             }
             catch
             {
-                Write-Log -Message "Failed to query NPM registry for dompurify`: $_" -Stream Warning
+                Write-Log -Message "Failed to query NPM registry for dompurify`: $_" -Level Warning
                 return $null
             }
 
             if ($null -eq $registry.time)
             {
-                Write-Log -Message 'NPM registry response for dompurify contains no time data' -Stream Warning
+                Write-Log -Message 'NPM registry response for dompurify contains no time data' -Level Warning
                 return $null
             }
 
             $currentParsed = if (-not [string]::IsNullOrEmpty($CurrentVersion)) { ParseNugetVersion -VersionString $CurrentVersion } else { $null }
 
             $reservedKeys = @('created', 'modified')
-            $stableVersions = $registry.time.PSObject.Properties |
+            $stableNewerEntries = $registry.time.PSObject.Properties |
                 Where-Object { $reservedKeys -notcontains $_.Name } |
                 Where-Object { IsStableVersion -VersionString $_.Name } |
                 Where-Object {
                     if ($null -eq $currentParsed) { return $true }
                     $v = ParseNugetVersion -VersionString $_.Name
                     ($null -ne $v -and $v -gt $currentParsed)
-                } |
-                Sort-Object -Property { ParseNugetVersion -VersionString $_.Name } -Descending
+                }
 
-            foreach ($entry in $stableVersions)
+            # Find the initial candidate: newest version satisfying the age rule
+            $initialCandidate = $null
+            foreach ($entry in ($stableNewerEntries | Sort-Object -Property { ParseNugetVersion -VersionString $_.Name } -Descending))
             {
                 $published = [datetime]::Parse(
                     $entry.Value,
@@ -541,12 +654,107 @@ begin
                 $ageHours = ([datetime]::UtcNow - $published.ToUniversalTime()).TotalHours
                 if ($ageHours -ge $MinAgeHours)
                 {
-                    return $entry.Name
+                    $initialCandidate = $entry.Name
+                    break
                 }
                 Write-Log -Message "  DOMPurify $($entry.Name) is $([math]::Round($ageHours, 1))h old (need $MinAgeHours); skipping"
             }
 
-            return $null
+            if ($null -eq $initialCandidate)
+            {
+                return $null
+            }
+
+            $currentVulns = if (-not [string]::IsNullOrEmpty($CurrentVersion))
+            {
+                @(GetPackageVulnerabilities -PackageId 'dompurify' -Version $CurrentVersion -Ecosystem 'npm')
+            }
+            else
+            {
+                @()
+            }
+
+            # Walk forward from the initial candidate (ascending) to find a vulnerability-free version
+            $initialParsed = ParseNugetVersion -VersionString $initialCandidate
+            $candidatesAscending = @($stableNewerEntries |
+                Where-Object {
+                    $v = ParseNugetVersion -VersionString $_.Name
+                    ($null -ne $v -and $v -ge $initialParsed)
+                } |
+                Sort-Object -Property { ParseNugetVersion -VersionString $_.Name })
+
+            $bestVersion = $initialCandidate
+            $bestVulns = @()
+
+            foreach ($entry in $candidatesAscending)
+            {
+                Write-Log -Message "  Checking vulnerabilities for DOMPurify $($entry.Name)"
+                $vulns = @(GetPackageVulnerabilities -PackageId 'dompurify' -Version $entry.Name -Ecosystem 'npm')
+                $bestVersion = $entry.Name
+                $bestVulns = $vulns
+
+                if ($vulns.Count -eq 0)
+                {
+                    break
+                }
+
+                $vulnNoun = if ($vulns.Count -eq 1) { 'vulnerability' } else { 'vulnerabilities' }
+                Write-Log -Message "  DOMPurify $($entry.Name) has $($vulns.Count) known $vulnNoun ($($vulns -join ', ')); trying newer version" -Level Warning
+            }
+
+            if ($bestVulns.Count -gt 0)
+            {
+                $vulnNoun = if ($bestVulns.Count -eq 1) { 'vulnerability' } else { 'vulnerabilities' }
+                Write-Log -Message "  No vulnerability-free DOMPurify version found; best available is $bestVersion with $($bestVulns.Count) known $vulnNoun" -Level Warning
+            }
+
+            return [PSCustomObject]@{
+                Version                       = $bestVersion
+                AgeRuleBypassed               = ($bestVersion -ne $initialCandidate)
+                CurrentVersionVulnerabilities = $currentVulns
+                TargetVersionVulnerabilities  = $bestVulns
+            }
+        }
+        end {}
+    }
+
+    function Build-VulnerabilityAnnotation
+    {
+        <#
+        .SYNOPSIS
+            Builds a parenthetical annotation string for a commit message line indicating
+            resolved or remaining vulnerabilities. Returns an empty string when there is
+            nothing noteworthy to report.
+        #>
+        [CmdletBinding()]
+        param (
+            [Parameter(Mandatory)]
+            [AllowEmptyCollection()]
+            [string[]]$CurrentVulns,
+
+            [Parameter(Mandatory)]
+            [AllowEmptyCollection()]
+            [string[]]$TargetVulns
+        )
+        begin {}
+        process
+        {
+            $parts = [System.Collections.Generic.List[string]]::new()
+
+            if ($CurrentVulns.Count -gt 0)
+            {
+                $noun = if ($CurrentVulns.Count -eq 1) { 'vulnerability' } else { 'vulnerabilities' }
+                $parts.Add("resolves $($CurrentVulns.Count) known $noun`: $($CurrentVulns -join ', ')")
+            }
+
+            if ($TargetVulns.Count -gt 0)
+            {
+                $noun = if ($TargetVulns.Count -eq 1) { 'vulnerability' } else { 'vulnerabilities' }
+                $parts.Add("WARNING: target still has $($TargetVulns.Count) known $noun`: $($TargetVulns -join ', ')")
+            }
+
+            if ($parts.Count -eq 0) { return '' }
+            return " ($($parts -join '; '))"
         }
         end {}
     }
@@ -630,14 +838,16 @@ process
     foreach ($pkg in $packages)
     {
         Write-Log -Message "Checking $($pkg.id) (current: $($pkg.version))"
-        $targetVersion = GetEligibleNugetVersion -PackageId $pkg.id -CurrentVersion $pkg.version -MinAgeHours $MinAgeHours
-        if ($null -ne $targetVersion)
+        $eligibleResult = GetEligibleNugetVersion -PackageId $pkg.id -CurrentVersion $pkg.version -MinAgeHours $MinAgeHours
+        if ($null -ne $eligibleResult)
         {
-            Write-Log -Message "  Eligible update: $($pkg.version) -> $targetVersion"
+            Write-Log -Message "  Eligible update: $($pkg.version) -> $($eligibleResult.Version)"
             $nugetUpdates.Add([PSCustomObject]@{
-                    Id             = $pkg.id
-                    CurrentVersion = $pkg.version
-                    TargetVersion  = $targetVersion
+                    Id                              = $pkg.id
+                    CurrentVersion                  = $pkg.version
+                    TargetVersion                   = $eligibleResult.Version
+                    VulnerabilitiesInCurrentVersion = $eligibleResult.CurrentVersionVulnerabilities
+                    TargetVersionVulnerabilities    = $eligibleResult.TargetVersionVulnerabilities
                 })
         }
         else
@@ -736,8 +946,11 @@ process
     $currentDisplayVersion = if ($null -ne $currentDomPurifyVersion) { $currentDomPurifyVersion } else { 'unknown' }
     Write-Log -Message "Current DOMPurify version: $currentDisplayVersion"
 
-    $targetDomPurifyVersion = GetEligibleDomPurifyVersion -MinAgeHours $MinAgeHours -CurrentVersion $currentDomPurifyVersion
-    $domPurifyChangeFound = $null -ne $targetDomPurifyVersion
+    $domPurifyResult = GetEligibleDomPurifyVersion -MinAgeHours $MinAgeHours -CurrentVersion $currentDomPurifyVersion
+    $domPurifyChangeFound = $null -ne $domPurifyResult
+    $targetDomPurifyVersion = if ($null -ne $domPurifyResult) { $domPurifyResult.Version } else { $null }
+    $domPurifyCurrentVulns = if ($null -ne $domPurifyResult) { $domPurifyResult.CurrentVersionVulnerabilities } else { @() }
+    $domPurifyTargetVulns = if ($null -ne $domPurifyResult) { $domPurifyResult.TargetVersionVulnerabilities } else { @() }
 
     if ($domPurifyChangeFound)
     {
@@ -785,7 +998,8 @@ process
         $commitLines.Add('NuGet:')
         foreach ($update in $nugetUpdates)
         {
-            $commitLines.Add("- $($update.Id): $($update.CurrentVersion) -> $($update.TargetVersion)")
+            $line = "- $($update.Id): $($update.CurrentVersion) -> $($update.TargetVersion)"
+            $commitLines.Add($line + (Build-VulnerabilityAnnotation -CurrentVulns $update.VulnerabilitiesInCurrentVersion -TargetVulns $update.TargetVersionVulnerabilities))
         }
     }
 
@@ -793,7 +1007,8 @@ process
     {
         if ($nugetUpdates.Count -gt 0) { $commitLines.Add('') }
         $commitLines.Add('Frontend:')
-        $commitLines.Add("- DOMPurify: $currentDisplayVersion -> $targetDomPurifyVersion")
+        $line = "- DOMPurify: $currentDisplayVersion -> $targetDomPurifyVersion"
+        $commitLines.Add($line + (Build-VulnerabilityAnnotation -CurrentVulns $domPurifyCurrentVulns -TargetVulns $domPurifyTargetVulns))
     }
 
     Write-Output ($commitLines -join "`n")

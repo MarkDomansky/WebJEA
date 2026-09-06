@@ -8,13 +8,16 @@
     used by downstream callers (Deploy-WebJEA, integration tests, CI).
 
     Build steps (psake tasks):
-    1. Init            - Resolve paths, generate version number
-    2. UpdateAssemblyInfo - Stamp version into AssemblyInfo.vb
-    3. RestoreNuGet    - Restore NuGet packages (skippable)
-    4. Compile         - Build solution with MSBuild
-    5. Package         - Assemble release package folder
-    6. CreateZip       - Create zip archive (optional)
-    7. SaveBuildInfo   - Write build-info.json
+    1. Init              - Resolve paths, take the version passed in (-Version)
+    2. GenerateAwsSecrets - Materialize AwsSecrets.cs from the template (CI secrets)
+    3. Restore           - dotnet restore (skippable)
+    4. Compile           - dotnet build with the calculated version
+    5. Test              - dotnet test (xUnit) + npm test (Jest)
+    6. Publish           - dotnet publish into the site folder
+    7. CopyReleaseFiles  - Copy ReleaseFiles\* plus LICENSE and
+                           LICENSE-attributions into the release package
+    8. CreateZip         - Create zip archive (optional)
+    9. SaveBuildInfo     - Write build-info.json
 
 .PARAMETER OutputPath
     Path where the release package will be created. Default: .\build-output
@@ -29,7 +32,7 @@
     If specified, skips the NuGet package restore step.
 
 .PARAMETER Version
-    Version to stamp into the build (semver, e.g. 2026.9.1 or 2100.0.0-alpha.1).
+    Version to stamp into the build (semver, e.g. 2100.0.0-alpha.1 or 2100.0.0).
     CI passes the value semantic-release computed; defaults to 0.0.0-local.
 
 .EXAMPLE
@@ -63,7 +66,7 @@ param(
     [Parameter()]
     [switch]$SkipNuGetRestore,
 
-    # Version to stamp into the build, e.g. 2026.9.1 or 2100.0.0-alpha.1.
+    # Version to stamp into the build, e.g. 2100.0.0-alpha.1 or 2100.0.0.
     # CI passes the version semantic-release computed from the commit history;
     # local builds get a placeholder so nothing looks like a real release.
     [Parameter()]

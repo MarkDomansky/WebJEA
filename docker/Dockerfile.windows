@@ -1,0 +1,35 @@
+# escape=`
+# WebJEA on Windows containers (Windows Server Core base for Negotiate/gMSA support).
+# Build from the repository root on a Windows host in Windows-container mode:
+#   docker build -f docker/Dockerfile.windows -t webjea:windows .
+#
+# Windows (Negotiate) authentication inside a container requires the container to
+# run with a gMSA credential spec (docker run --security-opt "credentialspec=file://webjea.json").
+# Without one, use Entra ID authentication (Authentication__Mode=Entra) instead.
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+
+# Restore as its own layer so dependency downloads are cached between builds.
+COPY WebJEA/WebJEA.csproj WebJEA/
+RUN dotnet restore WebJEA/WebJEA.csproj
+
+COPY WebJEA/ WebJEA/
+RUN dotnet publish WebJEA/WebJEA.csproj --configuration Release --output /app/publish
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-windowsservercore-ltsc2022
+WORKDIR /app
+COPY --from=build /app/publish .
+
+# C:\webjea\scripts holds config.json and the PowerShell scripts; C:\webjea\logs
+# receives the NLog output (WEBJEA_LOG_DIR is read by the shipped NLog.config).
+RUN mkdir C:\webjea\scripts C:\webjea\logs
+VOLUME ["C:/webjea/scripts", "C:/webjea/logs"]
+
+ENV ASPNETCORE_URLS=http://+:8080 `
+    ASPNETCORE_FORWARDEDHEADERS_ENABLED=true `
+    WEBJEA_LOG_DIR=C:/webjea/logs `
+    WebJEA__ConfigFile=C:/webjea/scripts/config.json
+
+EXPOSE 8080
+ENTRYPOINT ["dotnet", "WebJEA.dll"]

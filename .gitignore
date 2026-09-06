@@ -299,3 +299,15 @@ Test/Integration/config.json
 #AWS secrets - compiled into DLL. Copy AwsSecrets.template.vb to AwsSecrets.vb and fill in your values.
 WebJEA/AwsSecrets.vb
 Copilot-Processing.md
+
+# WebJEA telemetry secrets (CI-generated from AwsSecrets.template.cs)
+WebJEA/Telemetry/AwsSecrets.cs
+
+# Private working notes and local Entra test settings live outside the repo
+# (workspace root), never in the public tree.
+plan.md
+Test/Integration/entra.json
+
+
+# Superpowers/SDD working files - not part of the repo
+.superpowers/

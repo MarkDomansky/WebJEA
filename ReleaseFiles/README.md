@@ -1,1 +1,1 @@
-https://github.com/markdomansky/WebJEA/wiki/Installation
+https://github.com/markdomansky/webjea/blob/master/docs/Installation.md

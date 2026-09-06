@@ -1,0 +1,19 @@
+# Keep the build context to the two app projects; everything else is not needed
+# inside the image build.
+**/bin/
+**/obj/
+**/.vs/
+**/TestResults/
+.git/
+.github/
+.vscode/
+node_modules/
+Test/
+docs/
+docker/
+ReleaseFiles/
+schemas/
+*.md
+newlayout.html
+package.json
+package-lock.json

@@ -5,6 +5,12 @@
     "test": "jest"
   },
   "devDependencies": {
-    "jest": "^29.0.0"
+    "jest": "^29.0.0",
+    "jest-environment-jsdom": "^29.0.0"
+  },
+  "jest": {
+    "testMatch": [
+      "**/Test/Unit/**/*.Tests.js"
+    ]
   }
 }
