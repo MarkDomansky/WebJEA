@@ -24,7 +24,9 @@ Task Init {
     $script:solutionsPath = "$script:repoRoot\WebJEA"
     $script:projectFilePath = "$script:solutionsPath\WebJEA.vbproj"
     $script:assemblyInfoPath = "$script:solutionsPath\My Project\AssemblyInfo.vb"
-    $script:version = Get-Date -Format 'yyyy.M.d.HHmm'
+    # The version is passed in by build.ps1 (from semantic-release in CI); this
+    # script never invents one.
+    $script:version = if ($Version) { $Version } else { '0.0.0-local' }
 
     $projectXml = [xml](Get-Content -Path $script:projectFilePath)
 
@@ -61,10 +63,13 @@ Task UpdateAssemblyInfo -Depends Init {
     {
         throw "AssemblyInfo file not found at path: $script:assemblyInfoPath"
     }
+    # AssemblyVersion/AssemblyFileVersion must be numeric; drop any semver
+    # prerelease suffix (2100.0.0-alpha.1 -> 2100.0.0) before stamping.
+    $numericVersion = ($script:version -split '-')[0]
     $content = Get-Content $script:assemblyInfoPath -Raw -Encoding UTF8
-    $content = $content -replace '<Assembly: AssemblyVersion\(".*"\)>', '<Assembly: AssemblyVersion("{0}")>' -f $script:version
-    $content = $content -replace '<Assembly: AssemblyFileVersion\(".*"\)>', '<Assembly: AssemblyFileVersion("{0}")>' -f $script:version
-    $year = $script:version.split('.')[0]
+    $content = $content -replace '<Assembly: AssemblyVersion\(".*"\)>', '<Assembly: AssemblyVersion("{0}")>' -f $numericVersion
+    $content = $content -replace '<Assembly: AssemblyFileVersion\(".*"\)>', '<Assembly: AssemblyFileVersion("{0}")>' -f $numericVersion
+    $year = (Get-Date).Year
     $content = $content -replace '(<Assembly: AssemblyCopyright.*) \d{4}("\))', ('$1 {0}$2' -f $year)
     $content = $content.trim()
     # write-host -ForegroundColor darkgray $content

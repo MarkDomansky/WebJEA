@@ -28,6 +28,10 @@
 .PARAMETER SkipNuGetRestore
     If specified, skips the NuGet package restore step.
 
+.PARAMETER Version
+    Version to stamp into the build (semver, e.g. 2026.9.1 or 2100.0.0-alpha.1).
+    CI passes the value semantic-release computed; defaults to 0.0.0-local.
+
 .EXAMPLE
     .\Build.ps1 -OutputPath .\build-output
 
@@ -57,7 +61,13 @@ param(
     [string]$BuildConfiguration = 'Release',
 
     [Parameter()]
-    [switch]$SkipNuGetRestore
+    [switch]$SkipNuGetRestore,
+
+    # Version to stamp into the build, e.g. 2026.9.1 or 2100.0.0-alpha.1.
+    # CI passes the version semantic-release computed from the commit history;
+    # local builds get a placeholder so nothing looks like a real release.
+    [Parameter()]
+    [string]$Version = '0.0.0-local'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -99,6 +109,7 @@ $psakeParams = @{
         createZip          = [bool]$CreateZip
         skipNuGetRestore   = [bool]$SkipNuGetRestore
         buildInfoPath      = "$outputPathStr\build-info.json"
+        Version            = $Version
     }
     nologo     = $true
 }
