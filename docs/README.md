@@ -33,3 +33,13 @@ identity for users you authorize.
 
 * [Releasing](Releasing.md) — release lines (`alpha`, `beta`, `master`,
   `beta-2026`), how PR titles decide versions, promotions and back-merges
+
+## About these documents
+
+This folder is the source of truth for WebJEA's documentation. The
+[project wiki](https://github.com/markdomansky/WebJEA/wiki) is a generated,
+read-only mirror of this folder as it stands on `master`, republished
+automatically by `.github/workflows/wiki-sync.yml` — so it shows the docs for
+the release you can actually download. **Edit the files here, not the wiki**;
+wiki edits are overwritten by the next sync. See
+[Documentation](../CONTRIBUTING.md#documentation) in CONTRIBUTING.md.

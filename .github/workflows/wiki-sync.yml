@@ -1,0 +1,79 @@
+name: Sync Wiki
+# Publishes docs\ to https://github.com/markdomansky/WebJEA/wiki.
+#
+# docs\ is the source of truth; the wiki is a generated, read-only mirror of
+# the GA branch. sync-wiki.ps1 does the rendering (page names, link rewriting,
+# sidebar, "generated" banners) - see the comments in that script.
+#
+# The wiki intentionally tracks master only. Docs on alpha/beta describe
+# software nobody has yet, so publishing them would mislead users; they reach
+# the wiki when the line promotes to master.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/wiki-sync.yml'
+      - '.github/workflows/sync-wiki.ps1'
+  # Use this after enabling the wiki, changing the renderer, or to repair a
+  # wiki someone edited by hand.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# One push at a time - the wiki is a git repo and two concurrent pushes to it
+# would reject on non-fast-forward.
+concurrency:
+  group: wiki-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Render docs to wiki
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout docs
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # A wiki lives in its own repository, <repo>.wiki.git, which
+      # actions/checkout cannot address - hence the raw clone. It must already
+      # be initialized (create one page in the web UI once); GitHub does not
+      # create the wiki repo on first push.
+      #
+      # WIKI_TOKEN is a PAT with `repo` scope (classic) or Contents: write
+      # (fine-grained). GITHUB_TOKEN can usually push to a wiki, but that is
+      # not contractual, so a PAT is preferred when the secret exists.
+      - name: Clone wiki
+        env:
+          WIKI_TOKEN: ${{ secrets.WIKI_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TOKEN="${WIKI_TOKEN:-$GH_TOKEN}"
+          git clone "https://x-access-token:${TOKEN}@github.com/${{ github.repository }}.wiki.git" wiki
+
+      - name: Render docs
+        shell: pwsh
+        run: |
+          ./.github/workflows/sync-wiki.ps1 `
+            -DocsPath ./docs `
+            -WikiPath ./wiki `
+            -Repo '${{ github.repository }}' `
+            -Ref '${{ github.ref_name }}' | Out-Null
+
+      - name: Commit and push
+        working-directory: wiki
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo "::notice::Wiki already matches docs/ - nothing to push."
+            exit 0
+          fi
+          git diff --cached --name-status
+          git commit -m "docs: sync wiki from docs/ @ ${GITHUB_SHA::7}"
+          git push origin HEAD
+          echo "::notice::Wiki updated from docs/ at ${GITHUB_SHA::7}"
