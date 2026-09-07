@@ -83,3 +83,44 @@ Two hand-made tags exist and must never be deleted or recreated:
 
 Never create any other `v*` tag by hand and never edit a version string in the
 source: the workflow stamps the version into the build with `build.ps1 -Version`.
+
+## Documentation
+
+User documentation lives in [`docs/`](docs/README.md) and is edited there, the
+same way as code: topic branch, pull request, squash-merge. Docs-only changes
+cut no release - `release.yml` and `test.yml` both ignore `docs/**` and `**/*.md`.
+
+The [wiki](https://github.com/markdomansky/WebJEA/wiki) is **generated**, not
+authored. On every push to `master` that touches `docs/`,
+`.github/workflows/wiki-sync.yml` runs `.github/workflows/sync-wiki.ps1`, which
+renders `docs/` into the wiki repository and force-replaces its contents. Any
+page edited in the wiki UI is silently overwritten on the next sync, and a page
+the docs no longer produce is deleted. Because the trigger is `master` only, the
+wiki always describes the release users can download - docs written on `alpha`
+appear when that line is promoted.
+
+What the renderer does to each file (details in the script's comment header):
+
+- `docs/README.md` becomes `Home.md`; other file names become wiki page titles,
+  with readable names for the lowercase ones supplied by `$PageNameOverrides` in
+  the script. **Adding a docs file with a lowercase or unclear name means adding
+  an entry there**, otherwise it publishes as e.g. "Powershell7".
+- Links between docs lose their `.md` (`[x](Usage.md)` → `[x](Usage)`), anchors
+  preserved. A `*.md` link that resolves to no docs file **fails the workflow** -
+  that is the guard against typos and stale links.
+- Links reaching outside `docs/` (`../readme.md`, `../CONTRIBUTING.md`) become
+  absolute `github.com` URLs on `master`, since the wiki cannot see the code.
+- Every page gets a "this page is generated" banner, plus a `_Sidebar.md` built
+  from the headings and links in `docs/README.md` and a `_Footer.md`.
+
+Preview the output before pushing - this renders to a temp folder and changes
+nothing:
+
+```powershell
+.\.github\workflows\sync-wiki.ps1 -WikiPath . -TestOnly
+```
+
+Use the workflow's **Run workflow** button to repair the wiki after someone
+edits it by hand, or after changing the renderer. The workflow pushes with
+`secrets.WIKI_TOKEN` when that secret exists (a PAT with `repo`, or
+fine-grained Contents: write) and falls back to `GITHUB_TOKEN`.
