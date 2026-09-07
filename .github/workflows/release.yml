@@ -38,6 +38,10 @@ on:
       - 'Test/Integration/**'
       - 'Test/Dev/**'
       - 'Test/Scripts/**'
+      # Wiki publishing only - listed by name so that changes to build.ps1,
+      # build.psake.ps1, release.yml and test.yml still trigger a build.
+      - '.github/workflows/wiki-sync.yml'
+      - '.github/workflows/sync-wiki.ps1'
   workflow_dispatch:
 
 permissions:

@@ -21,3 +21,19 @@ workflow creates the tag itself, only after the build succeeds.
   `breaking` away from `major` in `.releaserc.cjs`: the `2100.0.0` line depends
   on that major bump.
 - `.releaserc.cjs` must stay a `.cjs` file; a `.releaserc.yml` would shadow it.
+
+## The wiki is generated from docs\
+
+Never edit the GitHub wiki, and never treat it as a source of content: pushes to
+`master` that touch `docs\` regenerate it wholesale via
+`.github/workflows/wiki-sync.yml` + `sync-wiki.ps1`. All user documentation is
+authored in `docs\`.
+
+- Adding a docs file whose name would make a poor wiki title (lowercase, or an
+  abbreviation) means adding an entry to `$PageNameOverrides` in
+  `.github/workflows/sync-wiki.ps1`.
+- A relative `*.md` link that points at no file in `docs\` **fails the sync
+  workflow** by design. Verify with
+  `.\.github\workflows\sync-wiki.ps1 -WikiPath . -TestOnly`, which renders to a
+  temp folder and writes nothing.
+- See the Documentation section of CONTRIBUTING.md.
