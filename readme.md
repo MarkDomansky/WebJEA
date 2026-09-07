@@ -62,13 +62,13 @@ There are some limitations with WebJEA.  All of these are considered areas for f
 
 ## Installation
 
-A DSC push configuration template is provided to get you going quickly.  Check the [Documentation](https://github.com/markdomansky/WebJEA/wiki) for more information.
+`Deploy.ps1` is provided to get you going quickly.  Check the [Documentation](docs/README.md) for more information, in particular the [Installation guide](docs/Installation.md) and [System Requirements](docs/System-Requirements.md).
 
 Installation Steps:
 1. Build a server, get a certificate, create a managed service account.
 2. Go to [Releases](https://github.com/markdomansky/WebJEA/releases), download and extract the latest release.
-3. Modify the DSCDeploy.ps1 with the machine name, certificate thumbprint, MSA username, and customize deployment folder, etc.
-4. execute DSCDeploy.ps1 configuration.  This will download and install the necessary DSC modules, the latest package, then start installation.
+3. Copy `settings.template.jsonc` and fill in the machine name, certificate thumbprint, MSA username, deployment folders, etc.  Every setting is described in the [settings reference](docs/Installation.md#settings-reference).
+4. From an elevated prompt, run `.\Deploy.ps1 -SettingsFile .\settings.jsonc`.  This installs the necessary DSC modules and Windows features, then deploys the site.  Add `-TestOnly` first to see what would change.
 5. Reboot should not be needed, but is recommended following first deployment.
 
 A demo script is included to confirm operation. Use the WebJEAConfig module to add additional scripts below.
