@@ -57,7 +57,7 @@ itself, always on. The old `EnableBackwardCompatibility` setting and the
 `site-redirect/` companion IIS app from earlier ASP.NET Core releases are gone
 entirely along with IIS.
 
-PowerShell 7 does **not** need a separate install on the server — the engine WebJEA runs scripts with ships inside the site folder and is hosted in-process. `Deploy.ps1` itself runs on **either edition**: it declares `#Requires -Version 5.1`, so the in-box Windows PowerShell on any supported Windows Server is enough, and it runs identically under `pwsh` if you have it. It must be elevated (`#Requires -RunAsAdministrator`).
+PowerShell 7 does **not** need a separate install on the server — the PowerShell 7 engine used by WebJEA to run scripts ships inside the site folder and is hosted in-process. `Deploy.ps1` itself runs on **either edition**: it declares `#Requires -Version 5.1`, so the in-box Windows PowerShell on any supported Windows Server is enough, and it runs identically under `pwsh` if you have it. It must be elevated (`#Requires -RunAsAdministrator`).
 
 `Deploy.ps1` has **no prerequisites of its own** — no PowerShell Gallery access, no DSC resource modules, and no WinRM configuration. It configures the server with in-box tooling only (`robocopy`, `sc.exe`, `secedit.exe`, `setspn.exe`, the firewall cmdlets). Earlier alpha builds installed the NuGet provider, PowerShellGet and three gallery DSC modules first; that whole step is gone, along with the `-OnlySections PowerShell` value that selected it.
 
