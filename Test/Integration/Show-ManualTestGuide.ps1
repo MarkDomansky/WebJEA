@@ -107,7 +107,7 @@ function Step_ServerPrereqs([bool]$Core, [bool]$ExpectIIS)
     $body += '    quick lab (local service account, NTLM only).'
     $body += '  - Nothing to install: Deploy.ps1 declares #Requires -Version 5.1, so the in-box'
     $body += '    Windows PowerShell is enough (it also runs unchanged under pwsh if present),'
-    $body += '    and the PowerShell 7 engine WebJEA runs scripts with ships inside the app.'
+    $body += '    and the PowerShell 7 engine used by WebJEA to run scripts ships inside the app.'
     $body += '    Worth running once each way to cover both editions.'
 
     $code = @()
