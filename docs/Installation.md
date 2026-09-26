@@ -25,15 +25,14 @@ For Linux hosting, Docker, or migrating an existing IIS install, see the
    password also works.
 4. Copy `settings.template.json` to e.g. `settings.json` and fill it in — every
    setting is described in the [settings reference](#settings-reference) below.
-5. From an elevated **PowerShell 7** (`pwsh`) prompt — not Windows PowerShell 5.1 —
-   run:
+5. From an elevated prompt — the in-box **Windows PowerShell 5.1** (`powershell.exe`) or **PowerShell 7** (`pwsh`), either works — run:
 
    ```powershell
    .\Deploy.ps1 -SettingsFile .\settings.json
    ```
 
    Add `-TestOnly` to see what would change without changing it, or restrict the run
-   with `-OnlySections PowerShell,Server,Service,WebJEA,Finalize`. If `HttpPort` is
+   with `-OnlySections Server,Service,WebJEA,Finalize`. If `HttpPort` is
    enabled without both `HttpsPort` and `CertThumbprint` set — an intentional
    HTTP-only install — add `-AllowHttpWithoutRedirect` to confirm HTTP will be served
    with no redirect to HTTPS.

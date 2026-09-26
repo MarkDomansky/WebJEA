@@ -20,8 +20,7 @@ The system requirements are pretty flexible and will depend on usage.
 Nothing to install: WebJEA hosts **PowerShell 7** in-process, and the engine ships
 inside the site folder. Scripts execute under PowerShell 7 — see
 [powershell7.md](powershell7.md) for the (small) compatibility differences from
-Windows PowerShell 5.1. Note that `Deploy.ps1` itself must be *run from* PowerShell 7
-(`pwsh`), elevated.
+Windows PowerShell 5.1. `Deploy.ps1` itself is *run from* either edition — the in-box **Windows PowerShell 5.1** (`powershell.exe`) or **PowerShell 7** (`pwsh`) — elevated. It needs no PowerShell Gallery access, DSC modules or WinRM configuration; it uses in-box tooling only.
 
 ## Service account
 

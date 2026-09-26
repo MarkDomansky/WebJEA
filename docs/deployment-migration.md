@@ -15,10 +15,9 @@ IIS is not installed or used.
    (service name, gMSA identity, listener ports, certificate thumbprint, scripts/log
    paths — see [Installation.md](Installation.md#settings-reference) for every
    setting and the schema changes below), and save it as e.g. `settings.json`.
-2. From an elevated **PowerShell 7** (`pwsh`) prompt — not Windows PowerShell 5.1 —
-   run: `.\Deploy.ps1 -SettingsFile .\settings.json`
+2. From an elevated prompt — **Windows PowerShell 5.1 (`powershell.exe`) or PowerShell 7 (`pwsh`)**, either works — run: `.\Deploy.ps1 -SettingsFile .\settings.json`
    (add `-TestOnly` to see what would change, or restrict the run with
-   `-OnlySections PowerShell,Server,Service,WebJEA,Finalize`).
+   `-OnlySections Server,Service,WebJEA,Finalize`).
 
 What it does:
 
@@ -58,12 +57,9 @@ itself, always on. The old `EnableBackwardCompatibility` setting and the
 `site-redirect/` companion IIS app from earlier ASP.NET Core releases are gone
 entirely along with IIS.
 
-PowerShell 7 does **not** need a separate install on the server for WebJEA itself —
-the engine ships inside the site folder and WebJEA hosts it in-process. `Deploy.ps1`
-is a different matter: it is written for PowerShell 7 and must be **run** from
-`pwsh` (PowerShell 7), elevated — see the step above. Running it from Windows
-PowerShell 5.1 (`powershell.exe`) fails with parse errors before the script gets a
-chance to print a friendly message.
+PowerShell 7 does **not** need a separate install on the server — the PowerShell 7 engine used by WebJEA to run scripts ships inside the site folder and is hosted in-process. `Deploy.ps1` itself runs on **either edition**: it declares `#Requires -Version 5.1`, so the in-box Windows PowerShell on any supported Windows Server is enough, and it runs identically under `pwsh` if you have it. It must be elevated (`#Requires -RunAsAdministrator`).
+
+`Deploy.ps1` has **no prerequisites of its own** — no PowerShell Gallery access, no DSC resource modules, and no WinRM configuration. It configures the server with in-box tooling only (`robocopy`, `sc.exe`, `secedit.exe`, `setspn.exe`, the firewall cmdlets). Earlier alpha builds installed the NuGet provider, PowerShellGet and three gallery DSC modules first; that whole step is gone, along with the `-OnlySections PowerShell` value that selected it.
 
 ### Settings schema changes (from the IIS-era settings file)
 

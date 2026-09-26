@@ -100,12 +100,15 @@ function Step_ServerPrereqs([bool]$Core, [bool]$ExpectIIS)
     }
     $body += ''
     $body += 'Requirements on the target:'
-    $body += '  - Local admin access, and internet access to the PowerShell Gallery'
-    $body += '    (Deploy.ps1 installs the NuGet provider, PowerShellGet 2.2.5, and the'
-    $body += '    xXMLConfigFile, cUserRightsAssignment, DSCR_FileContent modules).'
+    $body += '  - Local admin access. NO internet access required: Deploy.ps1 needs no'
+    $body += '    PowerShell Gallery modules, no DSC and no WinRM - it uses in-box tooling'
+    $body += '    only (robocopy, sc.exe, secedit.exe, setspn.exe, firewall cmdlets).'
     $body += '  - Domain-joined if you want to test Kerberos; a workgroup box works for a'
     $body += '    quick lab (local service account, NTLM only).'
-    $body += '  - PowerShell 7 (Deploy.ps1 declares #Requires -Version 7.0).'
+    $body += '  - Nothing to install: Deploy.ps1 declares #Requires -Version 5.1, so the in-box'
+    $body += '    Windows PowerShell is enough (it also runs unchanged under pwsh if present),'
+    $body += '    and the PowerShell 7 engine used by WebJEA to run scripts ships inside the app.'
+    $body += '    Worth running once each way to cover both editions.'
 
     $code = @()
     if ($Core)
@@ -114,12 +117,10 @@ function Step_ServerPrereqs([bool]$Core, [bool]$ExpectIIS)
         $code += 'Enter-PSSession -ComputerName <server> -Credential (Get-Credential)'
         $code += ''
     }
-    $code += '# Install PowerShell 7 (run from Windows PowerShell 5.1 on the server):'
-    $code += 'iex "& { $(irm https://aka.ms/install-powershell.ps1) } -UseMSI -Quiet"'
-    $code += '# or on a server with winget:'
-    $code += 'winget install --id Microsoft.PowerShell --source winget'
+    $code += '# Confirm which edition the elevated session is (either is supported):'
+    $code += '$PSVersionTable.PSVersion'
 
-    $verify = @('pwsh -v reports 7.x on the target server')
+    $verify = @('$PSVersionTable.PSVersion reports 5.1.x (or 7.x) in the elevated session on the target server')
     if ($ExpectIIS)
     {
         $verify += 'Get-Service W3SVC shows Running, and http://localhost/ serves the IIS site'
@@ -229,10 +230,10 @@ function Step_CopyAndSettings([int]$HttpPort, [int]$HttpsPort, [string]$PortNote
             'Copy-Item .\build-output \\<server>\c$\deploy -Recurse'
             '# On the server:'
             'Copy-Item C:\deploy\settings.template.json C:\deploy\settings.json'
-            'notepad C:\deploy\settings.json    # Server Core: use  pwsh -c "code" alternatives or edit remotely'
+            'notepad C:\deploy\settings.json    # Server Core: no notepad - edit remotely, or with (Get-Content ...) -replace ... | Set-Content ...'
             ''
             '# Sanity-check the file parses and shows your values:'
-            'pwsh -File C:\deploy\Deploy.ps1 -SettingsFile C:\deploy\settings.json -OnlyReturnSettings'
+            'powershell.exe -File C:\deploy\Deploy.ps1 -SettingsFile C:\deploy\settings.json -OnlyReturnSettings'
         )
         Verify = @(
             '-OnlyReturnSettings prints the settings object with your edited values'
@@ -251,7 +252,7 @@ function Step_TestOnlyDeploy
             '[CHANGE] / [SKIP] without changing the server.'
         )
         Code   = @(
-            '# Elevated PowerShell 7 session on the server:'
+            '# Elevated Windows PowerShell 5.1 session on the server:'
             'Set-Location C:\deploy'
             'pwsh -File .\Deploy.ps1 -SettingsFile .\settings.json -TestOnly'
         )
@@ -265,8 +266,8 @@ function Step_TestOnlyDeploy
 function Step_RealDeploy([string[]]$ExtraNotes)
 {
     $body = @(
-        'Run the real deployment. It installs PSGallery modules, configures WinRM,'
-        'copies the site to SitePath and starter scripts to ScriptsPath, creates the'
+        'Run the real deployment. It copies the site to SitePath and starter scripts'
+        'to ScriptsPath, creates the'
         'WebJEA Windows service, opens firewall ports, writes'
         'appsettings.Production.json, registers HTTP/<fqdn> SPNs, then starts the'
         'service and smoke-probes every FQDN/port combination.'
@@ -276,7 +277,7 @@ function Step_RealDeploy([string[]]$ExtraNotes)
         Title  = 'Deploy'
         Body   = $body
         Code   = @(
-            'pwsh -File .\Deploy.ps1 -SettingsFile .\settings.json'
+            'powershell.exe -File .\Deploy.ps1 -SettingsFile .\settings.json'
             ''
             '# If SPN registration fails (no AD write access) or setspn.exe is missing'
             '# and you accept NTLM-only authentication:'
@@ -347,7 +348,7 @@ function Step_RerunAndTests
         )
         Code   = @(
             '# On the server - expect every testable step to report [OK]:'
-            'pwsh -File .\Deploy.ps1 -SettingsFile .\settings.json'
+            'powershell.exe -File .\Deploy.ps1 -SettingsFile .\settings.json'
             ''
             '# Optional, from the repo on your workstation (see Test\Integration\config.json):'
             'Set-Location <repo-root>\Test\Integration'
@@ -489,9 +490,9 @@ function Get-Scenarios
                     'must stop BEFORE changing anything.'
                 )
                 Code   = @(
-                    '# Elevated PowerShell 7 on the server:'
+                    '# Elevated Windows PowerShell 5.1 on the server:'
                     'Set-Location C:\deploy'
-                    'pwsh -File .\Deploy.ps1 -SettingsFile .\settings.json'
+                    'powershell.exe -File .\Deploy.ps1 -SettingsFile .\settings.json'
                 )
                 Verify = @(
                     'The script throws: message names the conflicting port(s), explains the move'
@@ -514,7 +515,7 @@ function Get-Scenarios
                 )
                 Code   = @(
                     'pwsh -File .\Deploy.ps1 -SettingsFile .\settings.json -TestOnly   # review'
-                    'pwsh -File .\Deploy.ps1 -SettingsFile .\settings.json'
+                    'powershell.exe -File .\Deploy.ps1 -SettingsFile .\settings.json'
                 )
                 Note   = '-IgnoreExistingIIS exists for servers where IIS is installed but you have confirmed the bindings do not really conflict (or W3SVC is stopped/disabled). Do NOT use it while IIS actively holds the same ports - HTTP.sys and Kestrel would fight over them.'
                 Verify = @(
@@ -548,7 +549,7 @@ function Get-Scenarios
                 Title = 'What this scenario tests'
                 Body  = @(
                     'The mainline path: a clean Windows Server with a GUI and no IIS. Deploy.ps1'
-                    'should take the box from bare OS (plus PowerShell 7) to a running,'
+                    'should take the box from bare OS - no prerequisites installed - to a running,'
                     'authenticated WebJEA service in one run.'
                 )
             }
