@@ -7,6 +7,13 @@ Properties {
     $timeout = 900
     $doNotRunDeploy = $false
     $resetVM = $false
+    # Which PowerShell edition runs Deploy.ps1 on the VM. The script supports both
+    # (#Requires -Version 5.1, no DSC or other edition-specific dependencies); this
+    # switches the deploy task between them so both paths are actually covered.
+    # 'WindowsPowerShell' (the default) runs it in the PowerShell Direct session
+    # itself; 'PowerShell7' shells out to pwsh.exe on the VM, which must be installed
+    # there.
+    $deployEdition = 'WindowsPowerShell'
 }
 
 # ---------------------------------------------------------------------------
@@ -21,6 +28,8 @@ Task Init {
     $script:quickBuild = $QuickBuild
     $script:doNotRunDeploy = $DoNotRunDeploy
     $script:resetVM = $ResetVM
+    $script:deployEdition = if ($DeployEdition) { $DeployEdition } else { 'WindowsPowerShell' }
+    Assert ($script:deployEdition -in @('WindowsPowerShell', 'PowerShell7')) "DeployEdition '$script:deployEdition' is not valid. Use 'WindowsPowerShell' or 'PowerShell7'."
     Assert ($script:configPath -and (Test-Path $script:configPath)) "ConfigPath '$script:configPath' not found."
     Assert ($script:helpersPath -and (Test-Path $script:helpersPath)) "HelpersPath '$script:helpersPath' not found."
 
@@ -41,6 +50,7 @@ Task Init {
     Write-Log "  Quick Build:          $script:quickBuild"
     Write-Log "  Skip Windows Update:  $script:skipWindowsUpdate"
     Write-Log "  Do Not Run Deploy:    $script:doNotRunDeploy"
+    Write-Log "  Deploy Edition:       $script:deployEdition"
     Write-Log "  Reset VM:             $script:resetVM"
     Write-Log "  BuildOutputDir:       $script:buildOutputDir"
     Write-Log "  BuildInfoFile:        $script:buildInfoFile"
@@ -445,35 +455,56 @@ Task RunDeployScript -Depends GetCredential, StageDeployment -PreCondition { -no
         Write-Log 'Executing Deploy.ps1 on VM...'
         Write-Log "  Deploy root:   $script:stagedDeployRoot"
         Write-Log "  Settings file: $script:stagedSettingsPath"
+        Write-Log "  Edition:       $script:deployEdition"
 
         $result = Invoke-Command -Session $session -ScriptBlock {
-            param($DeployRoot, $SettingsPath)
+            param($DeployRoot, $SettingsPath, $Edition)
             $ErrorActionPreference = 'Stop'
 
             $deployScript = Get-ChildItem -Path $DeployRoot -Filter 'Deploy.ps1' -File | Select-Object -First 1
             if (-not $deployScript) { throw "Deploy.ps1 not found in: $DeployRoot" }
 
-            Write-Host "Executing $($deployScript.FullName)..."
-            $deployArgs = @{
-                SettingsFile = $SettingsPath
-            }
-
             # Ensure this process allows running the deploy script (temporary for this process only)
             Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 
-            $deployResult = & $deployScript.FullName @deployArgs -Verbose
+            if ($Edition -eq 'PowerShell7')
+            {
+                # PowerShell Direct lands in Windows PowerShell 5.1, so the PS7 pass has to
+                # shell out. Deploy.ps1 supports both editions; this is what proves it.
+                $pwsh = Get-Command pwsh.exe -ErrorAction SilentlyContinue
+                if (-not $pwsh)
+                {
+                    throw 'DeployEdition PowerShell7 was requested but pwsh.exe is not on the VM. Install PowerShell 7 there, or run with the default WindowsPowerShell edition.'
+                }
+                Write-Host "Executing $($deployScript.FullName) under $($pwsh.Source)..."
+                $deployResult = & $pwsh.Source -NoProfile -ExecutionPolicy Bypass `
+                    -File $deployScript.FullName -SettingsFile $SettingsPath -Verbose 2>&1
+                # A child process reports failure through its exit code, not a thrown error.
+                if ($LASTEXITCODE -ne 0)
+                {
+                    throw "Deploy.ps1 under pwsh.exe exited with code $LASTEXITCODE.`n$($deployResult | Out-String)"
+                }
+                $engine = 'pwsh.exe'
+            }
+            else
+            {
+                Write-Host "Executing $($deployScript.FullName) under Windows PowerShell $($PSVersionTable.PSVersion)..."
+                $deployResult = & $deployScript.FullName -SettingsFile $SettingsPath -Verbose
+                $engine = "Windows PowerShell $($PSVersionTable.PSVersion)"
+            }
 
             return @{
                 Success      = $true
                 DeployScript = $deployScript.FullName
+                Engine       = $engine
                 Output       = $deployResult | Out-String
             }
-        } -ArgumentList $script:stagedDeployRoot, $script:stagedSettingsPath
+        } -ArgumentList $script:stagedDeployRoot, $script:stagedSettingsPath, $script:deployEdition
 
         write-host ($result | convertto-json -depth 5)
         Assert $result.Success "Deployment failed: $($result.Output)"
 
-        Write-Log 'Deployment completed successfully!' -Level Success
+        Write-Log "Deployment completed successfully! (ran under $($result.Engine))" -Level Success
         if ($result.Output)
         {
             Write-Log 'Deployment output:'

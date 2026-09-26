@@ -19,7 +19,7 @@ param (
     [switch]$OnlyReturnSettings,
 
     [Parameter()]
-    [ValidateSet('PowerShell', 'Server', 'Service', 'WebJEA', 'Finalize', 'All')]
+    [ValidateSet('Server', 'Service', 'WebJEA', 'Finalize', 'All')]
     [string[]]$OnlySections = 'All',
 
     [Parameter()]
@@ -104,6 +104,186 @@ begin
         }
     }
 
+    function Step_XmlAttribute([string]$Path, [string]$XPath, [string]$Name, [string]$Value, [string]$Label)
+    {
+        #Sets one attribute on one element. NLog.config declares a DEFAULT namespace
+        #(xmlns="http://www.nlog-project.org/schemas/NLog.xsd"), so an ordinary
+        #/nlog/targets/... XPath matches nothing - every unprefixed step in the path would
+        #have to be bound to that URI through an XmlNamespaceManager. Callers pass
+        #local-name() predicates instead, which match with or without the namespace and
+        #keep working if a future NLog schema changes the URI.
+        #PreserveWhitespace keeps the indentation and every comment in the body of the
+        #file. It does NOT preserve whitespace INSIDE a tag, so the first write reflows
+        #the root <nlog> element's attributes onto one line and normalises '<x/>' to
+        #'<x />' - cosmetic, one-time, and the same in both editions.
+        @{
+            Description = $Label
+            TestScript  = {
+                if (-not (Test-Path $Path)) { return $false }
+                $xml = New-Object System.Xml.XmlDocument
+                $xml.PreserveWhitespace = $true
+                $xml.Load($Path)
+                $node = $xml.SelectSingleNode($XPath)
+                return ($null -ne $node -and $node.GetAttribute($Name) -eq $Value)
+            }.GetNewClosure()
+            SetScript   = {
+                $xml = New-Object System.Xml.XmlDocument
+                $xml.PreserveWhitespace = $true
+                $xml.Load($Path)
+                $node = $xml.SelectSingleNode($XPath)
+                if ($null -eq $node)
+                {
+                    throw "No element matched '$XPath' in $Path, so $Name could not be set. The file is not the one shipped with this release."
+                }
+                $node.SetAttribute($Name, $Value)
+                #Save through an explicit writer: XmlDocument.Save(path) would add a UTF-8
+                #BOM the shipped file does not have. Indent is off because
+                #PreserveWhitespace already carries the original layout.
+                $xmlSettings = New-Object System.Xml.XmlWriterSettings
+                $xmlSettings.Encoding = New-Object System.Text.UTF8Encoding $false
+                $xmlSettings.Indent = $false
+                $writer = [System.Xml.XmlWriter]::Create($Path, $xmlSettings)
+                try { $xml.Save($writer) } finally { $writer.Dispose() }
+            }.GetNewClosure()
+        }
+    }
+
+    function Step_JsonStringValue([string]$Path, [string]$Key, [string]$Value, [string]$Label)
+    {
+        #Sets one top-level string key in a JSON file, editing the TEXT rather than
+        #round-tripping the object. config.json is the admin's file - they add commands,
+        #comments and their own formatting to it - and ConvertFrom-Json | ConvertTo-Json
+        #would reformat the whole thing on every change, and silently flatten anything
+        #nested deeper than -Depth into literal "System.Object[]" strings. A targeted
+        #replacement of the one value leaves every other byte (BOM included) alone.
+        #The key is matched case-insensitively on purpose: the shipped file spells it
+        #'basepath' while this script asks for 'basePath', and JSON itself is
+        #case-sensitive - matching exactly would append a SECOND key rather than update
+        #the existing one.
+        $pattern = '(?i)("' + [regex]::Escape($Key) + '"\s*:\s*)"(?:[^"\\]|\\.)*"'
+        @{
+            Description = $Label
+            TestScript  = {
+                if (-not (Test-Path $Path)) { return $false }
+                try { $json = Get-Content -Path $Path -Raw | ConvertFrom-Json } catch { return $false }
+                #Read through the parsed object so the comparison sees the unescaped value.
+                $property = $json.PSObject.Properties | Where-Object { $_.Name -eq $Key } | Select-Object -First 1
+                return ($null -ne $property -and $property.Value -eq $Value)
+            }.GetNewClosure()
+            SetScript   = {
+                $raw = Get-Content -Path $Path -Raw
+                #JSON string escaping: backslashes first, then quotes. Windows paths are
+                #full of the former ("c:\scripts" must reach the file as "c:\\scripts").
+                $encoded = $Value.Replace('\', '\\').Replace('"', '\"')
+                if ($raw -match $pattern)
+                {
+                    $updated = [regex]::Replace($raw, $pattern, { param($m) $m.Groups[1].Value + '"' + $encoded + '"' })
+                }
+                else
+                {
+                    #Key absent (an admin removed it). Insert it as the first member rather
+                    #than rebuild the document.
+                    $brace = $raw.IndexOf('{')
+                    if ($brace -lt 0) { throw "$Path does not contain a JSON object, so $Key could not be set." }
+                    $updated = $raw.Insert($brace + 1, [Environment]::NewLine + '    "' + $Key + '": "' + $encoded + '",')
+                }
+                #WriteAllText, not Set-Content: -Encoding UTF8 writes a BOM on Windows
+                #PowerShell 5.1 and none on PowerShell 7, so the file would churn between
+                #editions. Both editions write the same bytes this way.
+                [System.IO.File]::WriteAllText($Path, $updated, (New-Object System.Text.UTF8Encoding $false))
+            }.GetNewClosure()
+        }
+    }
+
+    function Step_UserRight([string]$Constant, [string]$Account, [string]$Sid, [string]$Label)
+    {
+        #LSA account rights have no cmdlet in either PowerShell edition; secedit.exe is the
+        #in-box tool for them. Export the current USER_RIGHTS area, add this SID to the
+        #right's line, and configure the result back. Everything else in the exported area
+        #is re-applied exactly as it was read, so the write is limited to this one addition.
+        #Compared by SID because that is the form secedit exports, and it survives the
+        #account being renamed.
+        @{
+            Description = "$Account has the $Label right ($Constant)"
+            TestScript  = {
+                $export = Join-Path $env:TEMP "webjea-secedit-export-$PID.inf"
+                try
+                {
+                    #secedit writes the .inf as UTF-16; Get-Content follows its BOM.
+                    & secedit.exe /export /areas USER_RIGHTS /cfg $export /quiet | Out-Null
+                    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $export))
+                    {
+                        throw "secedit.exe /export failed with exit code $LASTEXITCODE, so the $Constant right could not be checked."
+                    }
+                    $line = @(Get-Content -Path $export | Where-Object { $_ -match "^\s*$Constant\s*=" })
+                    #Anchor on the delimiters so *S-1-5-21-...-1001 doesn't satisfy a test
+                    #for *S-1-5-21-...-100.
+                    return [bool]($line -match ('(?:=|,)\s*\*' + [regex]::Escape($Sid) + '\s*(?:,|$)'))
+                }
+                finally { Remove-Item -Path $export -Force -ErrorAction SilentlyContinue }
+            }.GetNewClosure()
+            SetScript   = {
+                $export = Join-Path $env:TEMP "webjea-secedit-export-$PID.inf"
+                $import = Join-Path $env:TEMP "webjea-secedit-import-$PID.inf"
+                $db = Join-Path $env:TEMP "webjea-secedit-$PID.sdb"
+                try
+                {
+                    & secedit.exe /export /areas USER_RIGHTS /cfg $export /quiet | Out-Null
+                    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $export))
+                    {
+                        throw "secedit.exe /export failed with exit code $LASTEXITCODE, so the $Constant right could not be granted."
+                    }
+
+                    $lines = @(Get-Content -Path $export)
+                    $index = -1
+                    for ($i = 0; $i -lt $lines.Count; $i++)
+                    {
+                        if ($lines[$i] -match "^\s*$Constant\s*=") { $index = $i; break }
+                    }
+                    if ($index -ge 0)
+                    {
+                        #Rebuild the list rather than appending ",*$Sid" to the raw text: a
+                        #line with an empty or trailing-comma value would otherwise produce
+                        #"SeServiceLogonRight =,*S-1-..." and secedit would reject the file.
+                        $current = @(($lines[$index] -split '=', 2)[1] -split ',' |
+                                ForEach-Object { $_.Trim() } | Where-Object { $_ })
+                        $lines[$index] = "$Constant = " + (@($current) + @("*$Sid") -join ',')
+                    }
+                    else
+                    {
+                        #Nobody currently holds the right, so the export has no line for it.
+                        #Add one under [Privilege Rights], which the USER_RIGHTS area always
+                        #emits.
+                        $section = -1
+                        for ($i = 0; $i -lt $lines.Count; $i++)
+                        {
+                            if ($lines[$i] -match '^\s*\[Privilege Rights\]\s*$') { $section = $i; break }
+                        }
+                        if ($section -lt 0) { throw "secedit.exe export from $export has no [Privilege Rights] section; cannot grant $Constant." }
+                        #$lines[($section+1)..($lines.Count-1)] would COUNT DOWN and silently
+                        #duplicate the tail if the section header were the last line, so the
+                        #empty case is spelled out instead of relying on the range.
+                        $tail = if ($section -lt $lines.Count - 1) { @($lines[($section + 1)..($lines.Count - 1)]) } else { @() }
+                        $lines = @($lines[0..$section]) + @("$Constant = *$Sid") + $tail
+                    }
+
+                    #secedit only reads UTF-16 .inf files; -Encoding Unicode is UTF-16LE on
+                    #both editions.
+                    Set-Content -Path $import -Value $lines -Encoding Unicode
+                    & secedit.exe /configure /db $db /cfg $import /areas USER_RIGHTS /quiet | Out-Null
+                    if ($LASTEXITCODE -ne 0)
+                    {
+                        throw "secedit.exe /configure failed with exit code $LASTEXITCODE while granting $Constant to $Account."
+                    }
+                }
+                finally
+                {
+                    Remove-Item -Path $export, $import, $db -Force -ErrorAction SilentlyContinue
+                }
+            }.GetNewClosure()
+        }
+    }
+
     function GetSteps_AppConfig($Settings)
     {
         ##################################################
@@ -147,139 +327,20 @@ begin
             }.GetNewClosure()
         }
 
-        #set nlog log location in nlog.config in iis site
-        @{
-            Description = 'Setting log file location in nlog.config'
-            Module      = 'xXMLConfigFile'
-            Resource    = 'XMLConfigFile'
-            Property    = @{
-                Ensure      = 'Present'
-                ConfigPath  = "$($settings.SitePath)\nlog.config"
-                XPath       = "/nlog/targets/target[@name='file']/target"
-                isAttribute = $true
-                Name        = 'fileName'
-                Value       = "$($settings.LogPath)\$($settings.LogFile)"
-            }
-        }
+        #set nlog log location in nlog.config in the site folder
+        Step_XmlAttribute -Path "$($settings.SitePath)\nlog.config" `
+            -XPath "//*[local-name()='target'][@name='file']/*[local-name()='target']" `
+            -Name 'fileName' -Value "$($settings.LogPath)\$($settings.LogFile)" `
+            -Label 'Setting log file location in nlog.config'
 
-        #set nlog usage file location in nlog.config in iis site
-        @{
-            Description = 'Setting usage log file location in nlog.config'
-            Module      = 'xXMLConfigFile'
-            Resource    = 'XMLConfigFile'
-            Property    = @{
-                Ensure      = 'Present'
-                ConfigPath  = "$($settings.SitePath)\nlog.config"
-                XPath       = "/nlog/targets/target[@name='fileSummary']/target"
-                isAttribute = $true
-                Name        = 'fileName'
-                Value       = "$($settings.LogPath)\$($settings.LogUsageFile)"
-            }
-        }
+        #set nlog usage file location in nlog.config in the site folder
+        Step_XmlAttribute -Path "$($settings.SitePath)\nlog.config" `
+            -XPath "//*[local-name()='target'][@name='fileSummary']/*[local-name()='target']" `
+            -Name 'fileName' -Value "$($settings.LogPath)\$($settings.LogUsageFile)" `
+            -Label 'Setting usage log file location in nlog.config'
         #TODO assign permissions to scripts folder?
     }
 
-    function GetSteps_PowerShell
-    {
-
-        @{Description = '***** Configuring PowerShell for DSC *****' }
-        #Package Management and NuGet provider are required to install the other DSC resource modules from the PowerShell Gallery, so ensure they're installed before trying to run any DSC resources.
-        @{
-            Description = 'NuGet Package Provider >=2.8.5.201 is installed'
-            TestScript  = {
-                $verboseMemory = $VerbosePreference
-                $VerbosePreference = 'SilentlyContinue'
-                $provider = Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue
-                $VerbosePreference = $verboseMemory
-                return $provider -and ($provider.Version -ge [Version]'2.8.5.201')
-            }
-            SetScript   = {
-                $verboseMemory = $VerbosePreference
-                $VerbosePreference = 'SilentlyContinue'
-                Install-PackageProvider -Name NuGet -Force -MinimumVersion '2.8.5.201'
-                #reload packagemanagement to ensure the new provider is available in the current session
-                # Remove-Module PackageManagement -Force
-                # Import-Module PackageManagement -Force
-                $VerbosePreference = $verboseMemory
-            }
-        }
-
-        #WinRM is required for DSC to work, so ensure it's configured before trying to run any DSC resources.
-        # WinRM service startup type is Automatic so it survives reboots
-        @{ Description = 'WinRM service startup type is Automatic'
-            TestScript = { (Get-Service -Name WinRM).StartType -eq 'Automatic' }
-            SetScript  = { Set-Service -Name WinRM -StartupType Automatic }
-        }
-
-        # WinRM service is running
-        @{ Description = 'WinRM service is running'
-            TestScript = { (Get-Service -Name WinRM).Status -eq 'Running' }
-            SetScript  = { Start-Service -Name WinRM }
-        }
-
-        # At least one WinRM listener is configured
-        @{ Description = 'WinRM has at least one listener configured'
-            TestScript = { (Get-ChildItem WSMan:\localhost\Listener | Measure-Object).Count -gt 0 }
-            SetScript  = { winrm quickconfig -quiet }
-        }
-
-        # # WinRM is listening on IPv6 — only checked when IPv6 is enabled on any adapter
-        # [bool]$ipv6Enabled = Get-NetAdapterBinding -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue | Where-Object Enabled
-        # if ($ipv6Enabled)
-        # {
-        #     @{ Description = 'WinRM is listening on IPv6'
-        #         TestScript       = {
-        #             $null -ne (Get-NetTCPConnection -LocalPort 5985 -State Listen -ErrorAction SilentlyContinue |
-        #                     Where-Object { $_.LocalAddress -match ':' })
-        #         }
-        #         SetScript        = { Restart-Service -Name WinRM }
-        #     }
-        # } else {
-        # }
-        #on an IPv4 address (0.0.0.0 means all IPv4 interfaces)
-
-        # WinRM is listening
-        @{ Description = 'WinRM is listening on IPv4'
-            TestScript = { $null -ne (Get-NetTCPConnection -LocalPort 5985 -State Listen -ErrorAction SilentlyContinue) }
-            SetScript  = { Restart-Service -Name WinRM }
-        }
-
-        @{
-            Description = 'PowerShellGet v2.2.5 installed'
-            TestScript  = {
-                $module = Get-Module -Name PowerShellGet -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
-                return $module -and ($module.Version -ge [Version]'2.2.5')
-            }
-            SetScript   = {
-                Install-Module -Name PowerShellGet -Force -RequiredVersion '2.2.5'
-                #reload PowerShellGet to ensure the new version is available in the current session
-                Remove-Module PowerShellGet -Force
-                Import-Module PowerShellGet -Force
-            }
-        }
-        @{
-            Description = 'PSGallery Installation Policy is Trusted'
-            TestScript  = { (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue).InstallationPolicy -eq 'Trusted' }
-            SetScript   = { Set-PSRepository -Name PSGallery -InstallationPolicy Trusted }
-        }
-
-        #Install required modules
-        $modules = @(
-            'xXMLConfigFile'
-            'cUserRightsAssignment'
-            # 'WebJEAConfig'
-            'DSCR_FileContent'
-        )
-        foreach ($module in $modules)
-        {
-            @{
-                Description = "PowerShell Module Installed: $module"
-                TestScript  = { Get-Module -Name $module -ListAvailable -ErrorAction SilentlyContinue }.GetNewClosure()
-                SetScript   = { Install-Module -Name $module -Force }.GetNewClosure()
-            }
-        }
-
-    }
     function GetSteps_Server
     {
         @{Description = '***** Configuring the Server *****' }
@@ -299,20 +360,26 @@ begin
         }
         else
         {
-            #add starter scripts
+            #add starter scripts. Only ever reached when ScriptsPath is absent or
+            #effectively empty (the branch above), so this is a first-install seed: a plain
+            #recursive copy, no checksum comparison to make.
+            $scriptSource = $settings.SourcePath + '\Scripts'
+            $scriptDest = $settings.ScriptsPath
             @{
                 Description = 'Starter scripts copied'
-                Module      = 'PSDesiredStateConfiguration'
-                Resource    = 'file'
-                Property    = @{
-                    Ensure          = 'Present'
-                    SourcePath      = $settings.SourcePath + '\Scripts'
-                    DestinationPath = $settings.ScriptsPath
-                    Recurse         = $true
-                    type            = 'Directory'
-                    MatchSource     = $true #always copy files to ensure accurate
-                    Checksum        = 'SHA-256'
-                }
+                TestScript  = {
+                    (Test-Path -Path $scriptDest -PathType Container) -and
+                    (Get-ChildItem -Path $scriptDest -Recurse -ErrorAction SilentlyContinue | Measure-Object).Count -gt 1
+                }.GetNewClosure()
+                SetScript   = {
+                    if (-not (Test-Path $scriptDest)) { New-Item -Path $scriptDest -ItemType Directory -Force | Out-Null }
+                    $params = @($scriptSource, $scriptDest, '/E', '/NJH', '/NJS', '/NFL', '/NDL')
+                    Write-Verbose "robocopy.exe $($params -join ' ')"
+                    & robocopy.exe $params
+                    #robocopy exit codes below 8 are success (0 = nothing to copy, 1 = files
+                    #copied, 2 = extra files present, ...); 8 and above are real failures.
+                    if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit code $LASTEXITCODE while copying starter scripts" }
+                }.GetNewClosure()
             }
         }
 
@@ -327,17 +394,11 @@ begin
         $password = $settings.ServicePassword
 
         #Grant Logon-as-a-Service directly to the service account (was granted to the
-        #IIS APPPOOL\ principal in the IIS era).
-        @{
-            Description = "$account has Logon as a Service right"
-            Module      = 'cUserRightsAssignment'
-            Resource    = 'cUserRight'
-            Property    = @{
-                Ensure    = 'Present'
-                Constant  = 'SeServiceLogonRight'
-                Principal = $account
-            }
-        }
+        #IIS APPPOOL\ principal in the IIS era). Resolved to a SID here rather than inside
+        #the step so an unresolvable account fails before anything has been changed, with
+        #ResolveAccountSid's message rather than a bare secedit exit code.
+        Step_UserRight -Constant 'SeServiceLogonRight' -Account $account `
+            -Sid (ResolveAccountSid -Account $account).Value -Label 'Logon as a Service'
 
         #Serving HTTPS takes more than putting the certificate in LocalMachine\My: that
         #store is readable by everyone, but the private key file behind the certificate is
@@ -529,19 +590,10 @@ begin
     function GetSteps_WebJEA($Settings)
     {
         @{ Description = '***** Configuring WebJEA Specific Settings *****' }
-        #Update config.json basePath property
-        @{
-            Description = 'basePath in config.json is set to the scripts folder'
-            Module      = 'DSCR_FileContent'
-            Resource    = 'JSONFile'
-            Property    = @{
-                Ensure   = 'Present'
-                Path     = "$($settings.ScriptsPath)\config.json"
-                Key      = 'basePath'
-                Value    = $settings.ScriptsPath
-                Encoding = 'ascii'
-            }
-        }
+        #Update config.json basepath property
+        Step_JsonStringValue -Path "$($settings.ScriptsPath)\config.json" `
+            -Key 'basepath' -Value $settings.ScriptsPath `
+            -Label 'basepath in config.json is set to the scripts folder'
 
     }
     function GetSteps_Finalize($Settings)
@@ -611,7 +663,6 @@ begin
 
     function GetSteps($Settings, $OnlySections)
     {
-        if ($OnlySections -contains 'All' -or $OnlySections -contains 'PowerShell') { GetSteps_PowerShell }
         if ($OnlySections -contains 'All' -or $OnlySections -contains 'Server') { GetSteps_Server }
         if ($OnlySections -contains 'All' -or $OnlySections -contains 'Service') { GetSteps_Service $Settings }
         if ($OnlySections -contains 'All' -or $OnlySections -contains 'WebJEA') { GetSteps_WebJEA $Settings }
@@ -619,45 +670,6 @@ begin
     }
     #endregion Config
     #region Functions
-    function ConvertToExpression($Obj)
-    {
-        if ($null -eq $Obj)
-        {
-            return '$null'
-        }
-        else
-        {
-            $strB = [System.Text.StringBuilder]::new()
-            switch ($Obj.GetType().Name)
-            {
-                'String' { return "'$($Obj)'" }
-                'Boolean' { if ($Obj) { return '$true' } else { return '$false' } }
-                'Hashtable'
-                {
-                    $strB.append('@{') | Out-Null
-                    foreach ($property in $Obj.keys)
-                    {
-                        $strB.append("$property = $(ConvertToExpression $Obj.$property); ") | Out-Null
-                    }
-                    $strB.append('}') | Out-Null
-                    return $strB.ToString()
-                }
-                'Object[]'
-                {
-                    $strB.append('@(') | Out-Null
-                    $ArrayObj = $Obj | ForEach-Object {
-                        "$(ConvertToExpression $_)"
-                    }
-                    $strB.append(($ArrayObj -join ', ')) | Out-Null
-                    $strB.append(')') | Out-Null
-                    return $strB.ToString()
-                }
-                default { return $Obj.tostring() }
-            }
-        }
-
-    }
-
     function NormalizeFQDNs($Value, [string]$KeyName)
     {
         #SiteFQDNs accepts a single string or an array of them. Trim, drop blanks and the
@@ -875,7 +887,7 @@ begin
             Write-Host "Error with configuration: $($Step | ConvertTo-Json -Depth 2)" -ForegroundColor Yellow
             return
         }
-        if ($step.description -and -not ($step.testscript -or $step.setscript -or $step.module))
+        if ($step.description -and -not ($step.testscript -or $step.setscript))
         {
             Write-Host $($Step.Description) -ForegroundColor Cyan
         }
@@ -899,26 +911,6 @@ begin
                 Write-Host '  [DONE]' -ForegroundColor Green
             }
         }
-        elseif ($Step.Module -and $Step.Resource)
-        {
-            ##### DSC Resource
-            #Write-Host -ForegroundColor black -BackgroundColor yellow
-            Write-Verbose "Invoke-DscResource -Module $($Step.Module) -Name $($Step.Resource) -Property $(ConvertToExpression $Step.Property) -Method Test"
-            # Write-Host (Invoke-DscResource -Module $Step.Module -Name $Step.Resource -Property $Step.Property -Method Get -Verbose:$false | ConvertTo-Json -Depth 1)
-            $verboseMemory = $VerbosePreference
-            $VerbosePreference = 'SilentlyContinue'
-            $test = Invoke-DscResource -Module $Step.Module -Name $Step.Resource -Property $Step.Property -Method Test
-            if (-not $test.InDesiredState -and -not $TestOnly)
-            {
-                Write-Host '  [SET] not in desired state. Updating...'
-                $set = Invoke-DscResource -Module $Step.Module -Name $Step.Resource -Property $Step.Property -Method Set
-
-                #After setting, test again to confirm it reached the desired state
-                $test = Invoke-DscResource -Module $Step.Module -Name $Step.Resource -Property $Step.Property -Method Test
-            }
-            $VerbosePreference = $verboseMemory
-            $hasTest = $true
-        }
         elseif ($Step.TestScript -and $Step.SetScript)
         {
             ##### Custom Script Resource
@@ -936,10 +928,10 @@ begin
             }
             $hasTest = $true
         }
-        elseif (-not $Step.TestScript -and -not $Step.SetScript -and -not $Step.Module -and -not $Step.Resource)
+        elseif (-not $Step.TestScript -and -not $Step.SetScript)
         {
-            #Empty step, do nothing
-            Write-Verbose 'No TestScript/SetScript or Module/Resource specified for this step. Skipping.'
+            #Heading-only step, nothing to do
+            Write-Verbose 'No TestScript/SetScript specified for this step. Skipping.'
         }
         else
         {

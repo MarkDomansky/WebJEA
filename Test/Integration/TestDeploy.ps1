@@ -33,6 +33,12 @@
 .PARAMETER DoNotRunDeploy
     Stage the package on the VM (transfer and extract) without executing DeployV3.ps1.
 
+.PARAMETER DeployEdition
+    Which PowerShell edition runs Deploy.ps1 on the VM. 'WindowsPowerShell' (default)
+    runs it in the PowerShell Direct session, which is Windows PowerShell 5.1.
+    'PowerShell7' shells out to pwsh.exe on the VM instead, which must be installed
+    there. Deploy.ps1 supports both; run it each way to cover both paths.
+
 .PARAMETER ResetVM
     Revert the Web Server VM to the baseline snapshot before deploying.
     When specified, the VM is stopped, reverted to the snapshot defined in config.json (HyperV.SnapshotName),
@@ -46,6 +52,10 @@
 
 .EXAMPLE
     .\TestDeploy.ps1 -ResetVM -UseGitHubBuild
+
+.EXAMPLE
+    # Cover the PowerShell 7 path (pwsh.exe must be installed on the VM)
+    .\TestDeploy.ps1 -ResetVM -DeployEdition PowerShell7
 
 .NOTES
     Requires Hyper-V PowerShell module and psake module.
@@ -71,6 +81,10 @@ param(
     [switch]$DoNotRunDeploy,
 
     [Parameter()]
+    [ValidateSet('WindowsPowerShell', 'PowerShell7')]
+    [string]$DeployEdition = 'WindowsPowerShell',
+
+    [Parameter()]
     [switch]$ResetVM
 )
 
@@ -93,6 +107,7 @@ $psakeParams = @{
         useGitHubBuild = [bool]$UseGitHubBuild
         quickBuild     = [bool]$QuickBuild
         doNotRunDeploy = [bool]$DoNotRunDeploy
+        deployEdition  = $DeployEdition
         resetVM        = [bool]$ResetVM
     }
     nologo     = $true
