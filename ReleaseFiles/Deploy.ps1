@@ -369,7 +369,7 @@ begin
                 Description = 'Starter scripts copied'
                 TestScript  = {
                     (Test-Path -Path $scriptDest -PathType Container) -and
-                    (Get-ChildItem -Path $scriptDest -Recurse -ErrorAction SilentlyContinue | Measure-Object).Count -gt 1
+                    (Get-ChildItem -Path $scriptDest -Recurse -File -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0
                 }.GetNewClosure()
                 SetScript   = {
                     if (-not (Test-Path $scriptDest)) { New-Item -Path $scriptDest -ItemType Directory -Force | Out-Null }
