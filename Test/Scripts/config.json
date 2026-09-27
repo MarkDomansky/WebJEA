@@ -133,6 +133,18 @@
       "permittedgroups": [ "*" ]
     },
     {
+      "id": "utsp-help-preamble",
+      "displayname": "utsp-help-preamble",
+      "script": "utsp-help-preamble.ps1",
+      "permittedgroups": [ "*" ]
+    },
+    {
+      "id": "utsp-help-htmlpayload",
+      "displayname": "utsp-help-htmlpayload",
+      "script": "utsp-help-htmlpayload.ps1",
+      "permittedgroups": [ "*" ]
+    },
+    {
       "id": "utsp-int-array",
       "displayname": "utsp-int-array",
       "script": "utsp-int-array.ps1",
@@ -322,6 +334,12 @@
       "id": "utwp-nohtml",
       "displayname": "utwp-nohtml",
       "script": "utwp-nohtml.ps1",
+      "permittedgroups": [ "*" ]
+    },
+    {
+      "id": "utwp-output-object",
+      "displayname": "utwp-output-object",
+      "script": "utwp-output-object.ps1",
       "permittedgroups": [ "*" ]
     },
     {
