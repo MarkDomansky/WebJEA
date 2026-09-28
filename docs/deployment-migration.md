@@ -11,10 +11,10 @@ Docker hosting (Linux and Windows containers) is covered separately in
 Windows Server deployment. It hosts WebJEA as a Kestrel-backed **Windows service** —
 IIS is not installed or used.
 
-1. Copy the extracted release to the server, fill in `settings.template.json`
+1. Copy the extracted release to the server, copy `settings.template.json` to `settings.json` and fill in with server specific settings.
    (service name, gMSA identity, listener ports, certificate thumbprint, scripts/log
    paths — see [Installation.md](Installation.md#settings-reference) for every
-   setting and the schema changes below), and save it as e.g. `settings.json`.
+   setting and the schema changes below), save.
 2. From an elevated prompt — **Windows PowerShell 5.1 (`powershell.exe`) or PowerShell 7 (`pwsh`)**, either works — run: `.\Deploy.ps1 -SettingsFile .\settings.json`
    (add `-TestOnly` to see what would change, or restrict the run with
    `-OnlySections Server,Service,WebJEA,Finalize`).
@@ -107,142 +107,8 @@ sub-app now runs as its own **container instance** behind a reverse proxy; see
 If you're not ready to move to containers, stay on the previous WebJEA release until
 you are.
 
-## Linux (Debian / RHEL)
-
-There is no automated installer for Linux; the manual steps are below. On Linux,
-`Authentication:Mode` must be `Entra` (Windows/AD auth requires a Windows host) — see
-[authentication.md](authentication.md). Scripts execute under PowerShell 7 on Linux, so
-Windows-specific modules are unavailable ([powershell7.md](powershell7.md)).
-
-### 1. Install the ASP.NET Core 10 runtime
-
-**Debian 12/13:**
-
-```bash
-wget https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
-sudo dpkg -i packages-microsoft-prod.deb && rm packages-microsoft-prod.deb
-sudo apt-get update
-sudo apt-get install -y aspnetcore-runtime-10.0
-```
-
-**RHEL 8/9/10 (and compatible):** .NET ships in Red Hat's AppStream repositories:
-
-```bash
-sudo dnf install -y aspnetcore-runtime-10.0
-```
-
-### 2. Lay out the application
-
-```bash
-sudo useradd --system --create-home --shell /usr/sbin/nologin webjea
-sudo mkdir -p /opt/webjea/site /opt/webjea/scripts /var/log/webjea
-# unzip the release; its site/ folder becomes /opt/webjea/site, its scripts/ folder seeds /opt/webjea/scripts
-sudo chown -R webjea:webjea /opt/webjea /var/log/webjea
-```
-
-Then adjust the configuration for Linux paths:
-
-- `/opt/webjea/scripts/config.json`: set `"basepath": "/opt/webjea/scripts"`.
-- Log location: either set the `WEBJEA_LOG_DIR` environment variable (the shipped
-  `NLog.config` reads it; see the systemd unit below) or edit both `fileName`
-  attributes in `/opt/webjea/site/NLog.config`.
-- `/opt/webjea/site/appsettings.Production.json` (create it):
-
-```json
-{
-  "WebJEA": { "ConfigFile": "/opt/webjea/scripts/config.json" },
-  "Authentication": { "Mode": "Entra" },
-  "AzureAd": {
-    "Instance": "https://login.microsoftonline.com/",
-    "TenantId": "<tenant-guid>",
-    "ClientId": "<client-id>",
-    "ClientSecret": "<secret>",
-    "CallbackPath": "/signin-oidc"
-  }
-}
-```
-
-### 3. Run as a systemd service
-
-`/etc/systemd/system/webjea.service`:
-
-```ini
-[Unit]
-Description=WebJEA
-After=network.target
-
-[Service]
-WorkingDirectory=/opt/webjea/site
-ExecStart=/usr/bin/dotnet /opt/webjea/site/WebJEA.dll
-Restart=always
-RestartSec=10
-KillSignal=SIGINT
-SyslogIdentifier=webjea
-User=webjea
-Environment=ASPNETCORE_ENVIRONMENT=Production
-Environment=ASPNETCORE_URLS=http://localhost:5000
-Environment=ASPNETCORE_FORWARDEDHEADERS_ENABLED=true
-Environment=WEBJEA_LOG_DIR=/var/log/webjea
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now webjea
-```
-
-`ASPNETCORE_FORWARDEDHEADERS_ENABLED=true` makes the app honor `X-Forwarded-Proto`/
-`X-Forwarded-For` from the reverse proxy, which Entra sign-in redirects require.
-
-### 4. Reverse proxy (nginx example)
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name webjea.example.com;
-    ssl_certificate     /etc/ssl/certs/webjea.crt;
-    ssl_certificate_key /etc/ssl/private/webjea.key;
-
-    location / {
-        proxy_pass http://localhost:5000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        # script executions can be long-running
-        proxy_read_timeout 300s;
-    }
-}
-```
-
-On RHEL with SELinux enforcing, allow nginx to proxy to the app:
-
-```bash
-sudo setsebool -P httpd_can_network_connect 1
-```
-
-Register `https://webjea.example.com/signin-oidc` as the redirect URI on the Entra app
-registration.
-
-### Upgrades (Linux)
-
-Stop the service, replace `/opt/webjea/site` with the new release's `site/` folder,
-restore your `appsettings.Production.json` and `NLog.config` edits (or keep them under
-version control), and start the service again.
-
 ## What no longer applies (vs. the WebForms releases)
 
-- No .NET Framework 4.8, no WebForms, no `packages/` content copying.
-- No IIS URL Rewrite module: the HTTP→HTTPS redirect is performed by the app itself,
-  automatically, whenever `WebJEA:HttpPort`/`HttpsPort`/`CertThumbprint` are all
-  configured; legacy `/webjea/*` and `*.aspx` URLs are permanently redirected by the
-  app as well.
-- `Web.config` transforms (`Web.Debug/Release/Remote.config`) are replaced by
-  `appsettings.{Environment}.json` + `ASPNETCORE_ENVIRONMENT`.
-- The `jQueryVersion`/`jQueryUIVersion` appSettings are gone — front-end libraries ship
-  under `wwwroot/lib` with fixed names.
 - In-place upgrade guidance: replace the `site/` contents but keep your
   `appsettings.Production.json` and `NLog.config`. Upgrading from a WebForms
   (pre-.NET 10) release is **not** an in-place upgrade — deploy fresh with Deploy.ps1

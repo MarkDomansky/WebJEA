@@ -6,15 +6,15 @@ WebJEA supports two authentication modes, selected by `Authentication:Mode` in
 | Mode | Hosts | Identity source | Authorization |
 |---|---|---|---|
 | `Windows` | Windows only | Kerberos/NTLM | Active Directory groups/users |
-| `Entra` | Windows or Linux | Entra ID (Azure AD) OIDC | Entra groups, users, or app roles |
+| `Entra` | Windows, or Linux containers | Entra ID (Azure AD) OIDC | Entra groups, users, or app roles |
 
 ## Mode selection
 
 - **Windows** is the default and recommended for domain-joined Windows Server
   deployments (self-hosted as a Windows service on Kestrel) with on-premises AD.
   Requires a Windows host.
-- **Entra** is required for Linux deployments and is recommended for cloud-hosted
-  scenarios. Works on Windows or Linux.
+- **Entra** is required for Linux containers and is recommended for cloud-hosted
+  scenarios. Works on Windows or in Linux containers.
 - Development: use **DevAutoLogin** mode for local testing without an identity provider
   (Development environment only).
 
@@ -26,9 +26,9 @@ WebJEA supports two authentication modes, selected by `Authentication:Mode` in
   integration
 - [Development auto-login](dev.md) — Local development without an identity provider
 
-## Linux hosting
+## Linux containers
 
-`Authentication:Mode` must be `Entra` on Linux — Windows/AD mode requires a Windows
-host and refuses to start elsewhere. Everything else (PowerShell 7 hosting, the API,
-the front end) is cross-platform. Note that scripts run under `pwsh` on the host OS, so
-Windows-specific modules (ActiveDirectory, IIS, etc.) are unavailable on Linux workers.
+`Authentication:Mode` must be `Entra` in a Linux container — Windows/AD mode requires a
+Windows host and refuses to start elsewhere. Scripts run under `pwsh` on Linux, so
+Windows-specific modules (ActiveDirectory, IIS, etc.) are unavailable; see
+[docker.md](docker.md) and [powershell7.md](powershell7.md).

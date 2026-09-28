@@ -5,7 +5,7 @@ Windows Server deployment: WebJEA runs as a Kestrel-backed **Windows service** â
 is not installed or used, and no .NET runtime needs to be installed on the server.
 The steps below get you to a working configuration.
 
-For Linux hosting, Docker, or migrating an existing IIS install, see the
+For Docker, or migrating an existing IIS install, see the
 [deployment guide](deployment-migration.md) and [docker.md](docker.md).
 
 ## Typical/Recommended installation (Windows)

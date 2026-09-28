@@ -2,7 +2,7 @@
 
 Entra ID mode uses OpenID Connect (OIDC) to authenticate users via your Entra ID
 (Azure AD) tenant, with authorization via Entra groups, individual users, or app roles.
-This mode works on both Windows (container and server) and Linux.
+This mode works on Windows servers and in Windows or Linux containers.
 
 ## Configuration
 
