@@ -134,10 +134,8 @@ Anything in `appsettings.json` can be overridden with environment variables usin
 ## TLS
 
 The recommended setup is a TLS-terminating reverse proxy (nginx, Traefik, YARP, an
-ingress controller) in front of the container, forwarding to port 8080 — the same
-pattern as the Linux systemd deployment in
-[deployment-migration.md](deployment-migration.md). The proxy handles the 80→443
-redirect in that case.
+ingress controller) in front of the container, forwarding to port 8080. The proxy
+handles the 80→443 redirect in that case.
 
 If you expose the container directly and terminate TLS in Kestrel, configure the
 certificate purely through standard Kestrel configuration — do **not** set
