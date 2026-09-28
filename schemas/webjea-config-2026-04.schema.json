@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://github.com/markdomansky/WebJEA/webjea-config-2026-03.schema.json",
+  "$id": "https://raw.githubusercontent.com/markdomansky/WebJEA/master/schemas/webjea-config-2026-04.schema.json",
   "title": "WebJEA Configuration",
   "description": "Configuration schema for WebJEA - a web-based JEA execution framework.",
   "type": "object",

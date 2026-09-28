@@ -36,18 +36,15 @@
 
 ## Editing the configuration
 
-Edit `config.json` directly (with schema validation in your editor), or use the
-[WebJEAConfig](https://www.powershellgallery.com/packages/WebJEAConfig) PowerShell
-module ([repo](https://github.com/markdomansky/WebJEAConfig)) with its basic
-Get/Set/New/Remove cmdlets:
+Edit `config.json` directly in an editor that understands JSON schemas, such as VS Code. Keep this line at the top of the file:
 
-1. Open the file using `Open-WebJEAFile`
-2. Make the changes desired using `Get-`/`Set-Config` and
-   `Get-`/`Set-`/`New-`/`Remove-Command`
-3. Save the file using `Save-WebJEAFile`
+```json
+"$schema": "https://raw.githubusercontent.com/markdomansky/WebJEA/master/schemas/webjea-config-2026-04.schema.json",
+```
 
-Note: the module was written for the classic configuration format — verify the
-result against the schema if you use it with a current release.
+The editor then autocompletes property names, shows each setting's description, and flags typos, wrong types, and missing required values (`Title`, `Commands`, and each command's `Id`) before WebJEA loads the file. Changes take effect on the next page load.
+
+The WebJEAConfig PowerShell module is retired and does not support settings added since the classic release (such as `DashboardHtml` and `RenderMode`). Use the schema instead.
 
 ## Writing scripts
 

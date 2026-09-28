@@ -80,27 +80,30 @@ Installation Steps:
 4. From an elevated **PowerShell 7** (`pwsh`) prompt — not Windows PowerShell 5.1 — run `.\Deploy.ps1 -SettingsFile .\settings.json`. This installs the required PowerShell modules, copies the release, and creates and starts the WebJEA Windows service.
 5. Reboot should not be needed, but is recommended following first deployment.
 
-A demo script is included to confirm operation. Use the WebJEAConfig module to add additional scripts below.
+A demo script is included to confirm operation. Add your own scripts as described below.
 
 ## Adding Scripts to WebJEA
 
-WebJEAConfig is a PowerShell Gallery Package to modify your WebJEA Configuration.
+WebJEA is configured by `config.json` in your scripts folder. The file references a published JSON schema through its `$schema` line, so editors such as VS Code validate and autocomplete it as you type. Add a script by appending an entry to `Commands`:
 
-#### Installation
-
-```powershell
-Install-Module WebJEAConfig
+```json
+{
+    "$schema": "https://raw.githubusercontent.com/markdomansky/WebJEA/master/schemas/webjea-config-2026-04.schema.json",
+    "Title": "WebJEA",
+    "Commands": [
+        {
+            "Id": "unlock",
+            "DisplayName": "Unlock User",
+            "Script": "unlock.ps1",
+            "PermittedGroups": ["domain\\helpdesk"]
+        }
+    ]
+}
 ```
 
-#### Adding a script
+See [docs/Usage.md](docs/Usage.md) for every setting.
 
-```powershell
-#Config.Json location and other inputs will depend on your specific configuration.
-Import-Module WebJEAConfig
-Open-WebJEAFile -Path "c:\webjea\config.json" 
-New-WebJEACommand -CommandId 'id' -DisplayName 'DisplayName' -Script 'script.ps1' -PermittedGroups @('*')
-Save-WebJEAFile
-```
+_The WebJEAConfig PowerShell module is retired; edit `config.json` directly._
 
 ## Security Considerations
 
