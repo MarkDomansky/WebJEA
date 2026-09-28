@@ -4,14 +4,14 @@
 
 .DESCRIPTION
     Parses all Task definitions in integration.psake.ps1 and the wrapper invocation
-    scripts (TestDeploy.ps1, ShutdownVM.ps1, ResetVM.ps1, Invoke-IntegrationTests.ps1)
+    scripts (TestDeploy.ps1, Invoke-IntegrationTests.ps1)
     to produce a Mermaid-formatted flowchart saved as integration.psake.md.
 
     The diagram shows:
       - Every psake task and its dependency edges
       - Which caller script invokes which entry task
       - Tasks carrying a -PreCondition guard (may be skipped at runtime)
-      - Visual grouping by workflow: Deploy, Snapshot Maintenance, Integration Tests, Shared
+      - Visual grouping by workflow: Deploy, Snapshot, Integration Tests, Shared
 
 .PARAMETER PsakePath
     Path to integration.psake.ps1. Defaults to the file in the script directory.
@@ -84,7 +84,7 @@ begin {
         param([string]$ScriptDir)
 
         $callers     = [System.Collections.Generic.List[hashtable]]::new()
-        $callerFiles = 'TestDeploy.ps1', 'ShutdownVM.ps1', 'ResetVM.ps1', 'Invoke-IntegrationTests.ps1'
+        $callerFiles = 'TestDeploy.ps1', 'Invoke-IntegrationTests.ps1'
 
         foreach ($fileName in $callerFiles) {
             $filePath = Join-Path $ScriptDir $fileName
@@ -110,9 +110,8 @@ begin {
                       'DeployToVM', 'Deploy')
         }
         Snapshot  = @{
-            Label = 'Snapshot Maintenance'
-            Tasks = @('RevertSnapshot_Web', 'ApplyUpdates_Web', 'ApplyUpdates_DC',
-                      'AddSnapshot_Web', 'ReplaceSnapshotBaseline', 'SnapshotMaintenance')
+            Label = 'Snapshot'
+            Tasks = @('RevertSnapshot_Web', 'RevertVMs')
         }
         IntegTest = @{
             Label = 'Integration Tests'
@@ -122,15 +121,12 @@ begin {
         Shared    = @{
             Label = 'Shared Tasks'
             Tasks = @('Init', 'GetCredential', 'StartVM_DC', 'StartVM_Web',
-                      'RestartVM_Web', 'StartVMs', 'StopVM_DC', 'StopVM_Web',
-                      'StopVM_Web2', 'StopVMs')
+                      'RestartVM_Web', 'StartVMs', 'StopVM_Web')
         }
     }
 
     $CallerDescriptions = @{
         'TestDeploy.ps1'              = 'Build (optional), stage, and deploy WebJEA to the test VM'
-        'ShutdownVM.ps1'              = 'Gracefully stop all test environment VMs'
-        'ResetVM.ps1'                 = 'Revert snapshot, apply Windows Updates, create new baseline snapshot'
         'Invoke-IntegrationTests.ps1' = 'Run Pester integration tests against the deployed WebJEA site'
     }
 }

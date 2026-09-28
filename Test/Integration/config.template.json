@@ -5,8 +5,6 @@
         "_comment": "Hyper-V host and VM configuration",
         "DomainControllerVMName": "DC01",
         "WebServerVMName": "WEB01",
-        "_comment1": "Optional: A debug/development VM that receives updates but has no snapshot baseline",
-        "WebDebugVMName": "",
         "SnapshotName": "Clean-Baseline",
         "HyperVHost": "localhost",
         "_comment2": "Timeout in seconds for VM operations",
@@ -67,17 +65,6 @@
         "ExcludeTags": ["Manual"],
         "_comment3": "Maximum test execution time in minutes",
         "TestTimeout": 30
-    },
-
-    "WindowsUpdate": {
-        "_comment": "Windows Update configuration for maintenance script",
-        "Enabled": true,
-        "_comment2": "Categories to include: Security, Critical, Definition, Feature, Update",
-        "Categories": ["Security", "Critical"],
-        "_comment3": "Whether to automatically reboot if required",
-        "AutoReboot": true,
-        "_comment4": "Maximum time in minutes to wait for updates to complete",
-        "Timeout": 120
     },
 
     "Logging": {
