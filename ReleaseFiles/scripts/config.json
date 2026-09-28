@@ -1,5 +1,5 @@
 ﻿{
-    "$schema": "https://raw.githubusercontent.com/markdomansky/webjea/master/schema/webjea-config-2026-04.schema.json",
+    "$schema": "https://raw.githubusercontent.com/markdomansky/WebJEA/master/schemas/webjea-config-2026-04.schema.json",
     "Title": "WebJEA",
     "DashboardHtml": "<b>WebJEA is now installed!</b>",
     "basepath": "c:\\scripts",
