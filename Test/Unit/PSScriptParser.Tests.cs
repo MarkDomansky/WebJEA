@@ -719,4 +719,43 @@ public class PSScriptParserTests
     }
 
     #endregion
+
+    #region utsp-help-preamble.ps1 - non-directive text before the first help directive
+
+    [Fact]
+    public void UtspHelpPreamble_ShouldIgnoreTextBeforeFirstDirective()
+    {
+        var parser = new PSScriptParser(GetScriptPath("utsp-help-preamble.ps1"));
+
+        // The block opens with "(just a test{with another test[[x]]})" before .SYNOPSIS.
+        // Braces, brackets and an output-tag lookalike must not be attributed to any
+        // section, and must not stop the real directives from parsing.
+        Assert.Equal("Synopsis String Check", parser.Synopsis);
+        Assert.Contains("Description String Check", parser.Description);
+        Assert.DoesNotContain("just a test", parser.Synopsis);
+        Assert.DoesNotContain("just a test", parser.Description);
+        Assert.Empty(parser.Examples);
+    }
+
+    #endregion
+
+    #region utsp-help-htmlpayload.ps1 - markup in synopsis and parameter help
+
+    [Fact]
+    public void UtspHelpHtmlPayload_ShouldParseAndCarryMarkupVerbatim()
+    {
+        var parser = new PSScriptParser(GetScriptPath("utsp-help-htmlpayload.ps1"));
+        var parameters = parser.GetParameters();
+
+        // Help text carrying a script tag and an unbalanced apostrophe must not trip the
+        // parser or cause the parameter to be dropped. Escaping is the renderer's job
+        // (escapeHtml / OutputRenderer), so the parser hands the text through unchanged.
+        Assert.Single(parameters);
+        var p = FindParam(parameters, "Var");
+        Assert.NotNull(p);
+        Assert.Contains("<script >alert('hi');</script>", p.HelpDetail);
+        Assert.Contains("<script >alert('hi');</script>", parser.Synopsis);
+    }
+
+    #endregion
 }

@@ -282,6 +282,42 @@ public class ApiEndpointsTests : IClassFixture<WebJeaApiFactory>
             m => m.GetProperty("stream").GetString() == "err");
     }
 
+    [Fact]
+    public async Task Execute_OutputObjectScript_Returns200WithSerializedOutput()
+    {
+        var client = CreateClient();
+
+        var response = await client.PostAsync("/api/execute", JsonBody("{\"cmdid\":\"utwp-output-object\",\"parameters\":{}}"));
+
+        Assert.Equal(200, (int)response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = doc.RootElement;
+        Assert.Equal(200, root.GetProperty("status").GetInt32());
+        Assert.Equal("OK", root.GetProperty("statusmessage").GetString());
+
+        // The API path runs with pipeToOutString: false, so success-stream objects land in
+        // "output" rather than the message queue. Three objects means an array.
+        var output = root.GetProperty("output");
+        Assert.Equal(JsonValueKind.Array, output.ValueKind);
+        var items = output.EnumerateArray().ToList();
+        Assert.Equal(3, items.Count);
+
+        // A plain string stays a JSON string.
+        Assert.Equal(JsonValueKind.String, items[0].ValueKind);
+        Assert.Equal("plain string on the success stream", items[0].GetString());
+
+        // A Hashtable becomes an object keyed by its entries.
+        Assert.Equal(JsonValueKind.Object, items[1].ValueKind);
+        Assert.Equal("value", items[1].GetProperty("Key").GetString());
+        Assert.Equal(2, items[1].GetProperty("Count").GetInt32());
+
+        // A PSCustomObject becomes an object keyed by its properties, nulls included.
+        Assert.Equal(JsonValueKind.Object, items[2].ValueKind);
+        Assert.Equal("abc", items[2].GetProperty("Id").GetString());
+        Assert.True(items[2].GetProperty("Enabled").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, items[2].GetProperty("Nothing").ValueKind);
+    }
+
     #endregion
 
     #region legacy redirects
