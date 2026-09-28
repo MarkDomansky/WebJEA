@@ -13,8 +13,8 @@ identity for users you authorize.
 
 ## Deployment and hosting
 
-* [Deployment guide](deployment-migration.md) — the Windows service (`Deploy.ps1`),
-  Linux hosting, and migrating from the classic IIS/WebForms releases
+* [Deployment guide](deployment-migration.md) — the Windows service (`Deploy.ps1`)
+  and migrating from the classic IIS/WebForms releases
 * [Docker](docker.md) — Linux and Windows container images
 
 ## Authentication

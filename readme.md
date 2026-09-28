@@ -42,7 +42,7 @@ The main goals for WebJEA:
 
 * WebJEA runs on **ASP.NET Core (.NET 10)** and hosts **PowerShell 7** in-process. Scripts execute under PowerShell 7 — see [docs/powershell7.md](docs/powershell7.md) for the (small) compatibility differences from Windows PowerShell 5.1.
 * Windows Server for the classic domain-joined deployment with Integrated Windows Authentication; a domain-joined server is required for AD group authorization. WebJEA installs as a self-hosted **Windows service** on Kestrel — no IIS role and no .NET runtime prerequisite, since the release is a self-contained package.
-* Alternatively, hosting on Linux (or Windows without AD) is supported using **Entra ID** authentication — see [docs/authentication.md](docs/authentication.md).
+* Alternatively, hosting on Windows without AD is supported using **Entra ID** authentication — see [docs/authentication.md](docs/authentication.md).
 * Docker images for Linux and Windows containers can be built from the included configurations — see [docs/docker.md](docs/docker.md).
 * CPU/RAM Requirements will depend significantly on your usage. <br>_Expect roughly the cost of spinning up a PowerShell 7 runspace per execution plus typical ASP.NET Core consumption.  Your usage will vary greatly depending on what your script does._
 
@@ -69,7 +69,7 @@ There are some limitations with WebJEA.  All of these are considered areas for f
 
 ## Installation
 
-The included `Deploy.ps1` installs and configures WebJEA as a self-hosted **Windows service** on Kestrel — no IIS, no prerequisites to install (the release is self-contained).  Running multiple instances (formerly sub-application installs under one IIS site) is now done with one container per instance — see [docs/docker.md](docs/docker.md).  See [docs/deployment-migration.md](docs/deployment-migration.md) for what changed from the WebForms/IIS releases, including how to migrate an existing IIS install, and for manual Linux (Debian/RHEL) hosting instructions.  Check the [Documentation](docs/README.md) for more information.
+The included `Deploy.ps1` installs and configures WebJEA as a self-hosted **Windows service** on Kestrel — no IIS, no prerequisites to install (the release is self-contained).  Running multiple instances (formerly sub-application installs under one IIS site) is now done with one container per instance — see [docs/docker.md](docs/docker.md).  See [docs/deployment-migration.md](docs/deployment-migration.md) for what changed from the WebForms/IIS releases, including how to migrate an existing IIS install.  Check the [Documentation](docs/README.md) for more information.
 
 **Breaking change:** `WebJEA:HttpsPort` now also enables the HTTPS listener; it is no longer a redirect-target-only setting — see [docs/deployment-migration.md](docs/deployment-migration.md).
 

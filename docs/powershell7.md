@@ -11,8 +11,7 @@ registered script (and onload script) manually under `pwsh` on the WebJEA server
   edition/version behave accordingly.
 - **`Get-WmiObject` and the `*-Wmi*` cmdlets are gone.** Use the CIM cmdlets
   (`Get-CimInstance`, `Invoke-CimMethod`, ...).
-- **`Add-PSSnapin` is gone.** Snap-in-based tooling (some legacy Exchange/third-party
-  snap-ins) must move to modules or remoting.
+- **`Add-PSSnapin` is gone.** Snap-in-based tooling (some legacy Exchange/third-party snap-ins) will need to move to modules or remoting.  If running on Windows Server (not in a container), you can leverage PowerShell 5 interop.
 - **Windows-PowerShell-only modules** may not load natively. PowerShell 7 can proxy many
   of them via the compatibility layer (`Import-Module <name> -UseWindowsPowerShell`),
   but proxied objects are deserialized — method calls on returned objects will not work.
@@ -40,6 +39,4 @@ registered script (and onload script) manually under `pwsh` on the WebJEA server
 
 ## Linux note
 
-When hosting WebJEA on Linux (Entra authentication mode), scripts run under `pwsh` on
-Linux: no Windows-specific modules (ActiveDirectory, IIS, ScheduledTasks, ...), and
-paths/permissions follow Linux conventions. See [authentication.md](authentication.md).
+When hosting WebJEA in a Linux container (Entra authentication mode), scripts run under `pwsh` on Linux: no Windows-specific modules (ActiveDirectory, IIS, ScheduledTasks, ...), and paths/permissions follow Linux conventions. See [authentication.md](authentication.md).

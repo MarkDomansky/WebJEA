@@ -9,9 +9,6 @@ The system requirements are pretty flexible and will depend on usage.
   self-hosted **Windows service** running on Kestrel — no IIS role is required or
   used, and the release is a self-contained .NET package, so there is no .NET runtime
   prerequisite to install.
-* **Linux** (Debian/RHEL and compatible) is supported when using
-  [Entra ID authentication](entra.md) — see the
-  [deployment guide](deployment-migration.md#linux-debian--rhel).
 * **Docker** images for Linux and Windows containers can be built from the included
   configurations — see [docker.md](docker.md).
 
