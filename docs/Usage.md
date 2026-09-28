@@ -42,7 +42,7 @@ Edit `config.json` directly in an editor that understands JSON schemas, such as 
 "$schema": "https://raw.githubusercontent.com/markdomansky/WebJEA/master/schemas/webjea-config-2026-04.schema.json",
 ```
 
-The editor then autocompletes property names, shows each setting's description, and flags typos, wrong types, and missing required values (`Title`, `Commands`, and each command's `Id`) before WebJEA loads the file. Changes take effect on the next page load.
+The editor then autocompletes property names, shows each setting's description, and flags wrong types and missing required values (`Title`, `Commands`, and each command's `Id`) before WebJEA loads the file. Changes take effect on the next page load.
 
 The WebJEAConfig PowerShell module is retired and does not support settings added since the classic release (such as `DashboardHtml` and `RenderMode`). Use the schema instead.
 
