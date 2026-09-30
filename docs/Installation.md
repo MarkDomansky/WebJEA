@@ -1,53 +1,27 @@
 # Installation
 
-WebJEA ships with `Deploy.ps1`, which installs and configures a self-contained
-Windows Server deployment: WebJEA runs as a Kestrel-backed **Windows service** — IIS
-is not installed or used, and no .NET runtime needs to be installed on the server.
-The steps below get you to a working configuration.
+WebJEA ships with `Deploy.ps1`, which installs and configures a self-contained Windows Server deployment: WebJEA runs as a Kestrel-backed **Windows service** — IIS is not installed or used, and no .NET runtime needs to be installed on the server. The steps below get you to a working configuration.
 
-For Docker, or migrating an existing IIS install, see the
-[deployment guide](deployment-migration.md) and [docker.md](docker.md).
+For Docker, or migrating an existing IIS install, see the [deployment guide](deployment-migration.md) and [docker.md](docker.md).
 
 ## Typical/Recommended installation (Windows)
 
-1. [Download](https://github.com/markdomansky/WebJEA/releases) the release zip and
-   extract it on the server. `Deploy.ps1` and `settings.template.json` are in the
-   root of the zip.
-2. Create an SSL certificate covering the host name(s) users will browse to, import
-   it into the `LocalMachine\My` store **with its private key**, and note the
-   thumbprint (no spaces, no hidden characters). You do not need to adjust the key's
-   permissions yourself — `Deploy.ps1` grants the service account read access to it,
-   which is what lets that account stay a non-administrator. *Optional but strongly
-   recommended — see
-   [System Requirements](System-Requirements.md#certificate-recommended).*
-3. Create a group Managed Service Account (gMSA) for the service to run as — see
-   [Creating a gMSA](#creating-a-gmsa) below. A standard AD user account with a
-   password also works.
-4. Copy `settings.template.json` to e.g. `settings.json` and fill it in — every
-   setting is described in the [settings reference](#settings-reference) below.
+1. [Download](https://github.com/markdomansky/WebJEA/releases) the release zip and extract it on the server. `Deploy.ps1` and `settings.template.json` are in the root of the zip.
+2. Create an SSL certificate covering the host name(s) users will browse to, import it into the `LocalMachine\My` store **with its private key**, and note the thumbprint (no spaces, no hidden characters). You do not need to adjust the key's permissions yourself — `Deploy.ps1` grants the service account read access to it, which is what lets that account stay a non-administrator. *Optional but strongly recommended — see [System Requirements](System-Requirements.md#certificate-recommended).*
+3. Create a group Managed Service Account (gMSA) for the service to run as — see [Creating a gMSA](#creating-a-gmsa) below. A standard AD user account with a password also works.
+4. Copy `settings.template.json` to e.g. `settings.json` and fill it in — every setting is described in the [settings reference](#settings-reference) below.
 5. From an elevated prompt — the in-box **Windows PowerShell 5.1** (`powershell.exe`) or **PowerShell 7** (`pwsh`), either works — run:
 
    ```powershell
    .\Deploy.ps1 -SettingsFile .\settings.json
    ```
 
-   Add `-TestOnly` to see what would change without changing it, or restrict the run
-   with `-OnlySections Server,Service,WebJEA,Finalize`. If `HttpPort` is
-   enabled without both `HttpsPort` and `CertThumbprint` set — an intentional
-   HTTP-only install — add `-AllowHttpWithoutRedirect` to confirm HTTP will be served
-   with no redirect to HTTPS.
-6. Browse to `https://<one of your SiteFQDNs>/`. By default, machine local administrators have
-   access to the starter page, which executes a demo script exercising the major
-   features of WebJEA so you can verify everything works.
+   Add `-TestOnly` to see what would change without changing it, or restrict the run with `-OnlySections Server,Service,WebJEA,Finalize`. If `HttpPort` is enabled without both `HttpsPort` and `CertThumbprint` set — an intentional HTTP-only install — add `-AllowHttpWithoutRedirect` to confirm HTTP will be served with no redirect to HTTPS.
+6. Browse to `https://<one of your SiteFQDNs>/`. By default, machine local administrators have access to the starter page, which executes a demo script exercising the major features of WebJEA so you can verify everything works.
 
-`Deploy.ps1` copies the site files, creates and starts the Windows service, writes the
-production configuration, grants the service account read access to the certificate's
-private key, opens firewall ports, verifies Kerberos SPNs, and smoke-tests every
-configured binding — the [deployment guide](deployment-migration.md) describes each
-step in detail.
+`Deploy.ps1` copies the site files, creates and starts the Windows service, writes the production configuration, grants the service account read access to the certificate's private key, opens firewall ports, verifies Kerberos SPNs, and smoke-tests every configured binding — the [deployment guide](deployment-migration.md) describes each step in detail.
 
-While not strictly required, running Windows updates after deployment is always a
-good idea.
+While not strictly required, running Windows updates after deployment is always a good idea.
 
 ## Settings reference
 
@@ -87,9 +61,7 @@ New-ADServiceAccount -Name gmsa1 -DNSHostName gmsa1.domain1.local `
 Install-ADServiceAccount gmsa1
 ```
 
-Grant the gMSA whatever permissions your scripts will need (start with none and add
-as required). In your settings file, use `"ServiceUserName": "domain1\\gmsa1$"` with
-an empty `ServicePassword`.
+Grant the gMSA whatever permissions your scripts will need (start with none and add as required). In your settings file, use `"ServiceUserName": "domain1\\gmsa1$"` with an empty `ServicePassword`.
 
 ## Next steps
 
