@@ -19,11 +19,7 @@ The main goals for WebJEA:
 * Control access via Active Directory groups and users, or Entra ID groups, users, and app roles (user only sees scripts they have access to) — see [docs/authentication.md](docs/authentication.md)
 * Mobile support using a responsive UI
 * Parses PowerShell advanced functions formatting for SYNOPSIS, DESCRIPTION, parameter names, variable types, and validation requirements
-* Supports pre-populating forms from ticketing systems or other sources via
-  query-string parameters on `/command.html?cmdid=...` (GET only — keep values
-  short and non-sensitive: they appear in logs and browser history, and very long
-  query strings can hit server or proxy limits). POST to any page URL returns 405;
-  the API is the only POST surface.
+* Supports pre-populating forms from ticketing systems or other sources via query-string parameters on `/command.html?cmdid=...` (GET only — keep values short and non-sensitive: they appear in logs and browser history, and very long query strings can hit server or proxy limits). POST to any page URL returns 405; the API is the only POST surface.
 * Onload script allows you to run a powershell script on page load to display dynamic data before the form
 * Scripts run in the context of the WebJEA Windows service account (or the container's configured identity) allowing for granular permissions.
 * Supports content formatting output including:
@@ -117,8 +113,7 @@ In-place upgrades remain straightforward: replace the `.\site` files in place, b
 
 ## License
 
-Copyright, 2018, Mark Domansky.  All rights not granted explicitly are reserved.
-This code is released under the GPL v3 license.
+Copyright, 2018, Mark Domansky.  All rights not granted explicitly are reserved. This code is released under the GPL v3 license.
 
 See the [License](LICENSE) and [Attributions](LICENSE-attributions) for details.
 

@@ -1,61 +1,27 @@
 # Deployment (ASP.NET Core migration)
 
-WebJEA is an ASP.NET Core application on .NET 10. The release zip's `site/` folder is a
-`dotnet publish` output rather than a WebForms site, which changes how it is hosted.
-Docker hosting (Linux and Windows containers) is covered separately in
-[docker.md](docker.md).
+WebJEA is an ASP.NET Core application on .NET 10. The release zip's `site/` folder is a `dotnet publish` output rather than a WebForms site, which changes how it is hosted. Docker hosting (Linux and Windows containers) is covered separately in [docker.md](docker.md).
 
 ## Windows: Deploy.ps1 (Windows service)
 
-`Deploy.ps1` (shipped in the release zip) installs and configures a self-contained
-Windows Server deployment. It hosts WebJEA as a Kestrel-backed **Windows service** —
-IIS is not installed or used.
+`Deploy.ps1` (shipped in the release zip) installs and configures a self-contained Windows Server deployment. It hosts WebJEA as a Kestrel-backed **Windows service** — IIS is not installed or used.
 
-1. Copy the extracted release to the server, copy `settings.template.json` to `settings.json` and fill in with server specific settings.
-   (service name, gMSA identity, listener ports, certificate thumbprint, scripts/log
-   paths — see [Installation.md](Installation.md#settings-reference) for every
-   setting and the schema changes below), save.
-2. From an elevated prompt — **Windows PowerShell 5.1 (`powershell.exe`) or PowerShell 7 (`pwsh`)**, either works — run: `.\Deploy.ps1 -SettingsFile .\settings.json`
-   (add `-TestOnly` to see what would change, or restrict the run with
-   `-OnlySections Server,Service,WebJEA,Finalize`).
+1. Copy the extracted release to the server, copy `settings.template.json` to `settings.json` and fill in with server specific settings. (service name, gMSA identity, listener ports, certificate thumbprint, scripts/log paths — see [Installation.md](Installation.md#settings-reference) for every setting and the schema changes below), save.
+2. From an elevated prompt — **Windows PowerShell 5.1 (`powershell.exe`) or PowerShell 7 (`pwsh`)**, either works — run: `.\Deploy.ps1 -SettingsFile .\settings.json` (add `-TestOnly` to see what would change, or restrict the run with `-OnlySections Server,Service,WebJEA,Finalize`).
 
 What it does:
 
-- Copies the self-contained `dotnet publish` output to `SitePath` — no **.NET Hosting
-  Bundle**, IIS features, or any other runtime prerequisite to install on the server;
-  `WebJEA.exe` runs standalone. A running service is stopped first so the copy isn't
-  blocked by locked files.
-- Creates the **`WebJEA`** Windows service (name configurable via `ServiceName`)
-  running `WebJEA.exe` as the gMSA (or domain/local account), set to **delayed
-  auto-start** with **restart-on-failure** (5s/10s/30s backoff, daily reset). The
-  **Logon as a Service** right is granted to the account directly (previously granted
-  to the IIS `APPPOOL\` principal).
-- Grants the service account **Read** on the HTTPS certificate's private key file
-  (when `HttpsPort` and `CertThumbprint` are set). Without this the account must be a
-  local administrator to open the key, because the `LocalMachine\My` store is readable
-  by everyone but the key file itself is not — see
-  [System Requirements](System-Requirements.md#certificate-recommended).
-- Writes `appsettings.Production.json` in the site folder: the `config.json` path,
-  `WebJEA:HttpPort`/`WebJEA:HttpsPort`/`WebJEA:CertThumbprint` (HTTP is automatically
-  redirected to HTTPS once all three are set — there is no separate setting for it),
-  and the top-level `AllowedHosts` (every configured FQDN plus the machine name and
-  `localhost` — this replaces IIS host-header bindings; requests for other host names
-  get HTTP 400). Because `appsettings.Production.json` is not part of the shipped
-  site files, it survives in-place upgrades. NLog's log-file paths are written the
-  same way as before.
+- Copies the self-contained `dotnet publish` output to `SitePath` — no **.NET Hosting Bundle**, IIS features, or any other runtime prerequisite to install on the server; `WebJEA.exe` runs standalone. A running service is stopped first so the copy isn't blocked by locked files.
+- Creates the **`WebJEA`** Windows service (name configurable via `ServiceName`) running `WebJEA.exe` as the gMSA (or domain/local account), set to **delayed auto-start** with **restart-on-failure** (5s/10s/30s backoff, daily reset). The **Logon as a Service** right is granted to the account directly (previously granted to the IIS `APPPOOL\` principal).
+- Grants the service account **Read** on the HTTPS certificate's private key file (when `HttpsPort` and `CertThumbprint` are set). Without this the account must be a local administrator to open the key, because the `LocalMachine\My` store is readable by everyone but the key file itself is not — see [System Requirements](System-Requirements.md#certificate-recommended).
+- Writes `appsettings.Production.json` in the site folder: the `config.json` path, `WebJEA:HttpPort`/`WebJEA:HttpsPort`/`WebJEA:CertThumbprint` (HTTP is automatically redirected to HTTPS once all three are set — there is no separate setting for it), and the top-level `AllowedHosts` (every configured FQDN plus the machine name and `localhost` — this replaces IIS host-header bindings; requests for other host names get HTTP 400). Because `appsettings.Production.json` is not part of the shipped site files, it survives in-place upgrades. NLog's log-file paths are written the same way as before.
 - Opens a Windows Firewall inbound rule for each enabled port.
-- Verifies (and attempts to register) the Kerberos SPN for every FQDN — see
-  [windows.md](windows.md#kerberos-requires-an-spn) — unless `-SkipSpnCheck` is passed.
-- Starts (or restarts) the service and smoke-probes every configured http/https
-  binding through `127.0.0.1`, failing the deploy if the app doesn't answer.
+- Verifies (and attempts to register) the Kerberos SPN for every FQDN — see [windows.md](windows.md#kerberos-requires-an-spn) — unless `-SkipSpnCheck` is passed.
+- Starts (or restarts) the service and smoke-probes every configured http/https binding through `127.0.0.1`, failing the deploy if the app doesn't answer.
 
-**WebJEA needs exclusive use of its configured ports** — nothing else on the host,
-including IIS, can be bound to `HttpPort`/`HttpsPort`.
+**WebJEA needs exclusive use of its configured ports** — nothing else on the host, including IIS, can be bound to `HttpPort`/`HttpsPort`.
 
-Legacy `/webjea/*` and `*.aspx` URLs are still permanently redirected by the app
-itself, always on. The old `EnableBackwardCompatibility` setting and the
-`site-redirect/` companion IIS app from earlier ASP.NET Core releases are gone
-entirely along with IIS.
+Legacy `/webjea/*` and `*.aspx` URLs are still permanently redirected by the app itself, always on. The old `EnableBackwardCompatibility` setting and the `site-redirect/` companion IIS app from earlier ASP.NET Core releases are gone entirely along with IIS.
 
 PowerShell 7 does **not** need a separate install on the server — the PowerShell 7 engine used by WebJEA to run scripts ships inside the site folder and is hosted in-process. `Deploy.ps1` itself runs on **either edition**: it declares `#Requires -Version 5.1`, so the in-box Windows PowerShell on any supported Windows Server is enough, and it runs identically under `pwsh` if you have it. It must be elevated (`#Requires -RunAsAdministrator`).
 
@@ -74,44 +40,21 @@ PowerShell 7 does **not** need a separate install on the server — the PowerShe
 | `SiteFQDN`, `SecondarySiteFQDNs` | `SiteFQDNs` | One array holding every host name WebJEA answers on; there is no primary/secondary distinction (all names were already treated identically for allowed hosts, SPNs, certificate coverage and the smoke probe). A single name may also be given as a plain string. Each entry is validated as a host name — no scheme, port, path or wildcard |
 | `AppName`, `ParentSiteName` | *(removed)* | Sub-application installs are no longer supported on Windows — see below |
 
-A settings file that still contains any retired key (`SiteName`, `AppPoolName`,
-`AppPoolUserName`, `AppPoolPassword`, `AppPoolLoadUserProfile`,
-`DisableDefaultWebsite`, `AppName`, `ParentSiteName`, `SiteFQDN`,
-`SecondarySiteFQDNs`) is rejected outright with an error naming the offending keys —
-Deploy.ps1 does not attempt a partial or best-effort translation of an old file.
+A settings file that still contains any retired key (`SiteName`, `AppPoolName`, `AppPoolUserName`, `AppPoolPassword`, `AppPoolLoadUserProfile`, `DisableDefaultWebsite`, `AppName`, `ParentSiteName`, `SiteFQDN`, `SecondarySiteFQDNs`) is rejected outright with an error naming the offending keys — Deploy.ps1 does not attempt a partial or best-effort translation of an old file.
 
 ### Migrating an existing IIS install
 
-1. Stop and remove the old WebJEA IIS site and app pool(s) (`Remove-Website`,
-   `Remove-WebAppPool`), or at minimum free up ports 80/443 so the new service can
-   bind them.
-2. Your existing `ScriptsPath`, `config.json`, and log files are reused as-is —
-   nothing to change there.
-3. Convert your settings file to the new schema (see the table above) and run
-   `Deploy.ps1` against it.
-4. Deploy.ps1 refuses to run while IIS has site bindings on the ports your
-   settings request (or when the `W3SVC` service exists but its bindings can't be
-   verified), so it can't half-migrate a server out from under a live IIS install.
-   IIS serving unrelated sites on other ports is fine and does not block the
-   deployment. Pass `-IgnoreExistingIIS` to skip the check entirely once you've
-   confirmed any remaining conflict is resolved.
+1. Stop and remove the old WebJEA IIS site and app pool(s) (`Remove-Website`, `Remove-WebAppPool`), or at minimum free up ports 80/443 so the new service can bind them.
+2. Your existing `ScriptsPath`, `config.json`, and log files are reused as-is — nothing to change there.
+3. Convert your settings file to the new schema (see the table above) and run `Deploy.ps1` against it.
+4. Deploy.ps1 refuses to run while IIS has site bindings on the ports your settings request (or when the `W3SVC` service exists but its bindings can't be verified), so it can't half-migrate a server out from under a live IIS install. IIS serving unrelated sites on other ports is fine and does not block the deployment. Pass `-IgnoreExistingIIS` to skip the check entirely once you've confirmed any remaining conflict is resolved.
 5. Once the new install is verified, the old site folder can be deleted.
 
 ### Sub-application installs are no longer supported
 
-The previous sub-application model — installing additional WebJEA instances into
-subfolders of a site, each with its own app pool and credential
-(`settings-subapp.template.jsonc`) — was removed along with IIS hosting. Each former
-sub-app now runs as its own **container instance** behind a reverse proxy; see
-[docker.md — Multiple instances (sub-sites) and scaling](docker.md#multiple-instances-sub-sites-and-scaling).
-If you're not ready to move to containers, stay on the previous WebJEA release until
-you are.
+The previous sub-application model — installing additional WebJEA instances into subfolders of a site, each with its own app pool and credential (`settings-subapp.template.jsonc`) — was removed along with IIS hosting. Each former sub-app now runs as its own **container instance** behind a reverse proxy; see [docker.md — Multiple instances (sub-sites) and scaling](docker.md#multiple-instances-sub-sites-and-scaling). If you're not ready to move to containers, stay on the previous WebJEA release until you are.
 
 ## What no longer applies (vs. the WebForms releases)
 
-- In-place upgrade guidance: replace the `site/` contents but keep your
-  `appsettings.Production.json` and `NLog.config`. Upgrading from a WebForms
-  (pre-.NET 10) release is **not** an in-place upgrade — deploy fresh with Deploy.ps1
-  and point it at your existing scripts folder.
-- **Breaking change:** `WebJEA:HttpsPort` now also enables the HTTPS listener; it is
-  no longer a redirect-target-only setting (see the settings schema table above).
+- In-place upgrade guidance: replace the `site/` contents but keep your `appsettings.Production.json` and `NLog.config`. Upgrading from a WebForms (pre-.NET 10) release is **not** an in-place upgrade — deploy fresh with Deploy.ps1 and point it at your existing scripts folder.
+- **Breaking change:** `WebJEA:HttpsPort` now also enables the HTTPS listener; it is no longer a redirect-target-only setting (see the settings schema table above).

@@ -1,8 +1,6 @@
 # Development Auto-Login
 
-For local development only, use `DevAutoLogin` mode to authenticate every request as a
-configured test user without needing an identity provider or app registration. This is
-inert outside the Development environment.
+For local development only, use `DevAutoLogin` mode to authenticate every request as a configured test user without needing an identity provider or app registration. This is inert outside the Development environment.
 
 ## Configuration
 
@@ -25,14 +23,11 @@ Required (in the Development environment only):
 
 ## How it works
 
-Every HTTP request is authenticated as the configured `DevUser`, regardless of any actual
-identity provider. The configured `Name` and `Sids` are used for authorization checks
-against your `config.json` `PermittedGroups`.
+Every HTTP request is authenticated as the configured `DevUser`, regardless of any actual identity provider. The configured `Name` and `Sids` are used for authorization checks against your `config.json` `PermittedGroups`.
 
 ## Authorization matching
 
-In this mode, group names from `PermittedGroups` in your `config.json` are matched
-**literally** against the entries in `DevUser:Sids`. For example:
+In this mode, group names from `PermittedGroups` in your `config.json` are matched **literally** against the entries in `DevUser:Sids`. For example:
 
 ```json
 {
@@ -47,17 +42,13 @@ In this mode, group names from `PermittedGroups` in your `config.json` are match
 }
 ```
 
-The user matches `Domain Admins` and `Finance` (in `Sids`), so they have access to commands
-authorized for those groups. `HR` is not in `Sids`, so access is denied for HR-only
-commands.
+The user matches `Domain Admins` and `Finance` (in `Sids`), so they have access to commands authorized for those groups. `HR` is not in `Sids`, so access is denied for HR-only commands.
 
-The wildcard `*` in `PermittedGroups` grants access to any authenticated user and is
-honored at the command level, just like production.
+The wildcard `*` in `PermittedGroups` grants access to any authenticated user and is honored at the command level, just like production.
 
 ## Example launchSettings.json
 
-A typical development setup in `Properties/launchSettings.json` (WebJEA always runs on
-Kestrel, including under `dotnet run`/F5 in the IDE — there is no IIS Express profile):
+A typical development setup in `Properties/launchSettings.json` (WebJEA always runs on Kestrel, including under `dotnet run`/F5 in the IDE — there is no IIS Express profile):
 
 ```json
 {
@@ -87,17 +78,13 @@ And `appsettings.Development.json`:
 }
 ```
 
-Now every request signs in as `DEV\alice` with `Domain Admins` membership, and you can
-test authorization without deploying the Windows service or configuring Entra ID.
+Now every request signs in as `DEV\alice` with `Domain Admins` membership, and you can test authorization without deploying the Windows service or configuring Entra ID.
 
 ## Limitations
 
-- **Development only.** The feature is completely inert (`ASPNETCORE_ENVIRONMENT` is not
-  `Development`). It cannot be enabled in staging or production.
-- **No actual authentication.** There is no credential validation — every request gets the
-  same test identity.
-- **Literal group matching.** Group names are matched exactly; no AD or Entra lookup
-  occurs.
+- **Development only.** The feature is completely inert (`ASPNETCORE_ENVIRONMENT` is not `Development`). It cannot be enabled in staging or production.
+- **No actual authentication.** There is no credential validation — every request gets the same test identity.
+- **Literal group matching.** Group names are matched exactly; no AD or Entra lookup occurs.
 
 ## Related
 
