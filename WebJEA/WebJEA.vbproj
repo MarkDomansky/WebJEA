@@ -63,29 +63,24 @@
     <NoWarn>42016,41999,42017,42018,42019,42032,42036,42020,42021,42022</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="AWSSDK.Core, Version=4.0.0.0, Culture=neutral, PublicKeyToken=885c28607f98e604">
-      <HintPath>packages\AWSSDK.Core.4.0.9\lib\net472\AWSSDK.Core.dll</HintPath>
-      <Private>True</Private>
+    <Reference Include="AWSSDK.Core, Version=4.0.0.0, Culture=neutral, PublicKeyToken=885c28607f98e604, processorArchitecture=MSIL">
+      <HintPath>packages\AWSSDK.Core.4.0.102.8\lib\net472\AWSSDK.Core.dll</HintPath>
     </Reference>
-    <Reference Include="AWSSDK.SQS, Version=4.0.0.0, Culture=neutral, PublicKeyToken=885c28607f98e604">
-      <HintPath>packages\AWSSDK.SQS.4.0.3.3\lib\net472\AWSSDK.SQS.dll</HintPath>
-      <Private>True</Private>
+    <Reference Include="AWSSDK.SQS, Version=4.0.0.0, Culture=neutral, PublicKeyToken=885c28607f98e604, processorArchitecture=MSIL">
+      <HintPath>packages\AWSSDK.SQS.4.0.100.15\lib\net472\AWSSDK.SQS.dll</HintPath>
     </Reference>
-    <Reference Include="Microsoft.Bcl.AsyncInterfaces, Version=10.0.0.9, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51">
-      <HintPath>packages\Microsoft.Bcl.AsyncInterfaces.10.0.9\lib\net462\Microsoft.Bcl.AsyncInterfaces.dll</HintPath>
-      <Private>True</Private>
+    <Reference Include="Microsoft.Bcl.AsyncInterfaces, Version=10.0.0.12, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
+      <HintPath>packages\Microsoft.Bcl.AsyncInterfaces.10.0.12\lib\net462\Microsoft.Bcl.AsyncInterfaces.dll</HintPath>
     </Reference>
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
       <HintPath>packages\Newtonsoft.Json.13.0.4\lib\net45\Newtonsoft.Json.dll</HintPath>
     </Reference>
-    <Reference Include="NLog, Version=6.0.0.0, Culture=neutral, PublicKeyToken=5120e14c03d0593c">
-      <HintPath>packages\NLog.6.1.3\lib\net46\NLog.dll</HintPath>
-      <Private>True</Private>
+    <Reference Include="NLog, Version=6.0.0.0, Culture=neutral, PublicKeyToken=5120e14c03d0593c, processorArchitecture=MSIL">
+      <HintPath>packages\NLog.6.2.1\lib\net46\NLog.dll</HintPath>
     </Reference>
-    <Reference Include="NLog.Web, Version=6.0.0.0, Culture=neutral, PublicKeyToken=5120e14c03d0593c">
-      <HintPath>packages\NLog.Web.6.1.3\lib\net46\NLog.Web.dll</HintPath>
-      <Private>True</Private>
+    <Reference Include="NLog.Web, Version=6.0.0.0, Culture=neutral, PublicKeyToken=5120e14c03d0593c, processorArchitecture=MSIL">
+      <HintPath>packages\NLog.Web.6.2.1\lib\net46\NLog.Web.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Buffers, Version=4.0.5.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
@@ -97,9 +92,8 @@
     <Reference Include="System.DirectoryServices.AccountManagement" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.IO.Compression" />
-    <Reference Include="System.IO.Pipelines, Version=10.0.0.9, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51">
-      <HintPath>packages\System.IO.Pipelines.10.0.9\lib\net462\System.IO.Pipelines.dll</HintPath>
-      <Private>True</Private>
+    <Reference Include="System.IO.Pipelines, Version=10.0.0.12, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
+      <HintPath>packages\System.IO.Pipelines.10.0.12\lib\net462\System.IO.Pipelines.dll</HintPath>
     </Reference>
     <Reference Include="System.Management" />
     <Reference Include="System.Management.Automation, Version=3.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL">
@@ -122,13 +116,11 @@
       <HintPath>packages\System.Security.Principal.Windows.5.0.0\lib\net461\System.Security.Principal.Windows.dll</HintPath>
     </Reference>
     <Reference Include="System.ServiceModel" />
-    <Reference Include="System.Text.Encodings.Web, Version=10.0.0.9, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51">
-      <HintPath>packages\System.Text.Encodings.Web.10.0.9\lib\net462\System.Text.Encodings.Web.dll</HintPath>
-      <Private>True</Private>
+    <Reference Include="System.Text.Encodings.Web, Version=10.0.0.12, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
+      <HintPath>packages\System.Text.Encodings.Web.10.0.12\lib\net462\System.Text.Encodings.Web.dll</HintPath>
     </Reference>
-    <Reference Include="System.Text.Json, Version=10.0.0.9, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51">
-      <HintPath>packages\System.Text.Json.10.0.9\lib\net462\System.Text.Json.dll</HintPath>
-      <Private>True</Private>
+    <Reference Include="System.Text.Json, Version=10.0.0.12, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
+      <HintPath>packages\System.Text.Json.10.0.12\lib\net462\System.Text.Json.dll</HintPath>
     </Reference>
     <Reference Include="System.Threading.Tasks.Extensions, Version=4.2.4.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
       <HintPath>packages\System.Threading.Tasks.Extensions.4.6.3\lib\net462\System.Threading.Tasks.Extensions.dll</HintPath>
@@ -344,6 +336,7 @@
     <None Include="NLog.xsd">
       <SubType>Designer</SubType>
     </None>
+    <None Include="packages.config" />
     <None Include="Scripts\jquery-3.7.1.intellisense.js" />
     <Content Include="Scripts\jquery-3.7.1.js" />
     <Content Include="Scripts\jquery-3.7.1.min.js" />
@@ -518,10 +511,8 @@
     <None Include="My Project\Settings.settings">
       <Generator>SettingsSingleFileGenerator</Generator>
       <CustomToolNamespace>My</CustomToolNamespace>
-      <LastGenOutput>Settings.Designer.vb</LastGenOutput>
     </None>
     <None Include="NLog.config" />
-    <None Include="packages.config" />
     <Content Include="Scripts\umd\popper.min.js.map" />
     <Content Include="Scripts\umd\popper.js.map" />
     <Content Include="Scripts\umd\popper.js.flow" />
@@ -598,8 +589,8 @@
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
     </PropertyGroup>
     <Error Condition="!Exists('packages\System.ValueTuple.4.6.2\build\net471\System.ValueTuple.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\System.ValueTuple.4.6.2\build\net471\System.ValueTuple.targets'))" />
-    <Error Condition="!Exists('packages\NLog.Schema.6.1.3\build\NLog.Schema.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\NLog.Schema.6.1.3\build\NLog.Schema.targets'))" />
+    <Error Condition="!Exists('packages\NLog.Schema.6.2.1\build\NLog.Schema.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\NLog.Schema.6.2.1\build\NLog.Schema.targets'))" />
   </Target>
   <Import Project="packages\System.ValueTuple.4.6.2\build\net471\System.ValueTuple.targets" Condition="Exists('packages\System.ValueTuple.4.6.2\build\net471\System.ValueTuple.targets')" />
-  <Import Project="packages\NLog.Schema.6.1.3\build\NLog.Schema.targets" Condition="Exists('packages\NLog.Schema.6.1.3\build\NLog.Schema.targets')" />
+  <Import Project="packages\NLog.Schema.6.2.1\build\NLog.Schema.targets" Condition="Exists('packages\NLog.Schema.6.2.1\build\NLog.Schema.targets')" />
 </Project>

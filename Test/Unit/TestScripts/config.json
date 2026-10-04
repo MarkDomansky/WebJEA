@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/markdomansky/webjea/master/schema/webjea-config-2026-04.schema.json",
+  "$schema": "https://raw.githubusercontent.com/markdomansky/WebJEA/master/schemas/webjea-config-2026-04.schema.json",
   "Title": "Config Title",
   "DashboardHtml": "<b>WebJEA is now installed!</b>",
   "basepath": "C:\\prj\\webjea-dev\\test\\unit\\testscripts",
@@ -216,7 +216,17 @@
       "id": "utsp-validateset",
       "displayname": "utsp-validateset",
       "script": "utsp-validateset.ps1",
-      "permittedgroups": [ "*" ]
+      "permittedgroups": [
+        "*"
+      ]
+    },
+    {
+      "id": "utsp-validateset-default",
+      "displayname": "utsp-validateset-default",
+      "script": "utsp-validateset-default.ps1",
+      "permittedgroups": [
+        "*"
+      ]
     },
     {
       "id": "utsp-webjeahostname",

@@ -235,7 +235,7 @@ Public Class ControlBuilder
 
         Dim objControl As New DropDownList
         objControl.ID = param.FieldName
-        objControl.CssClass += " form-control"
+        objControl.CssClass += " form-control form-select"
         objLabel.AssociatedControlID = objControl.ID
 
         Dim defval As String = Nothing
