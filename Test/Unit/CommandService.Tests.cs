@@ -14,7 +14,7 @@ public class CommandServiceTests
     public void LoadConfig_ValidConfigFile_LoadsTitle()
     {
         var svc = new CommandService();
-        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "config.json"));
+        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "webjea.json"));
         var mockResolver = new Mock<IGroupResolver>();
         mockResolver.Setup(g => g.GetSID(It.IsAny<string>())).Returns("");
 
@@ -28,7 +28,7 @@ public class CommandServiceTests
     public void LoadConfig_ValidConfigFile_LoadsCommands()
     {
         var svc = new CommandService();
-        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "config.json"));
+        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "webjea.json"));
         var mockResolver = new Mock<IGroupResolver>();
         mockResolver.Setup(g => g.GetSID(It.IsAny<string>())).Returns("");
 
@@ -51,13 +51,36 @@ public class CommandServiceTests
     public void LoadConfig_InitializesAuthService()
     {
         var svc = new CommandService();
-        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "config.json"));
+        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "webjea.json"));
         var mockResolver = new Mock<IGroupResolver>();
         mockResolver.Setup(g => g.GetSID(It.IsAny<string>())).Returns("");
 
         svc.LoadConfig(configPath, mockResolver.Object);
 
         Assert.NotNull(svc.Auth);
+    }
+
+    [Fact]
+    public void LoadConfig_ConfiguredFileMissing_FallsBackToLegacyConfigJson()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "webjea-legacyconfig-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.Copy(Path.GetFullPath(Path.Combine(TestScriptsPath, "webjea.json")), Path.Combine(dir, CommandService.LegacyConfigFileName));
+            var svc = new CommandService();
+            var mockResolver = new Mock<IGroupResolver>();
+            mockResolver.Setup(g => g.GetSID(It.IsAny<string>())).Returns("");
+
+            svc.LoadConfig(Path.Combine(dir, "webjea.json"), mockResolver.Object);
+
+            Assert.NotNull(svc.Config);
+            Assert.NotEmpty(svc.Config.Commands);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
     }
 
     #endregion
@@ -68,7 +91,7 @@ public class CommandServiceTests
     public void ResolveCommandId_AuthorizedUser_ReturnsRequestedId()
     {
         var svc = new CommandService();
-        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "config.json"));
+        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "webjea.json"));
         var mockResolver = new Mock<IGroupResolver>();
         mockResolver.Setup(g => g.GetSID("*")).Returns("*");
         mockResolver.Setup(g => g.GetSID(It.IsNotIn("*"))).Returns("");
@@ -85,7 +108,7 @@ public class CommandServiceTests
     public void ResolveCommandId_UnauthorizedUser_ReturnsEmptyString()
     {
         var svc = new CommandService();
-        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "config.json"));
+        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "webjea.json"));
         var mockResolver = new Mock<IGroupResolver>();
         mockResolver.Setup(g => g.GetSID(It.IsAny<string>())).Returns("");
 
@@ -105,7 +128,7 @@ public class CommandServiceTests
     public void GetCommand_AuthorizedUser_ReturnsConfigCmd()
     {
         var svc = new CommandService();
-        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "config.json"));
+        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "webjea.json"));
         var mockResolver = new Mock<IGroupResolver>();
         mockResolver.Setup(g => g.GetSID(It.IsAny<string>())).Returns("S-1-5-21-MATCH");
 
@@ -122,7 +145,7 @@ public class CommandServiceTests
     public void GetCommand_UnauthorizedUser_ReturnsNothing()
     {
         var svc = new CommandService();
-        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "config.json"));
+        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "webjea.json"));
         var mockResolver = new Mock<IGroupResolver>();
         mockResolver.Setup(g => g.GetSID(It.IsAny<string>())).Returns("");
 
@@ -143,7 +166,7 @@ public class CommandServiceTests
     public void GetScriptCmd_CommandWithScript_ReturnsNonNull()
     {
         var svc = new CommandService();
-        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "config.json"));
+        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "webjea.json"));
         var mockResolver = new Mock<IGroupResolver>();
         mockResolver.Setup(g => g.GetSID(It.IsAny<string>())).Returns("");
 
@@ -159,7 +182,7 @@ public class CommandServiceTests
     public void GetScriptCmd_CommandWithoutScript_ReturnsNothing()
     {
         var svc = new CommandService();
-        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "config.json"));
+        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "webjea.json"));
         var mockResolver = new Mock<IGroupResolver>();
         mockResolver.Setup(g => g.GetSID(It.IsAny<string>())).Returns("");
 
@@ -174,7 +197,7 @@ public class CommandServiceTests
     public void GetScriptCmd_UnknownCommand_ReturnsNothing()
     {
         var svc = new CommandService();
-        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "config.json"));
+        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "webjea.json"));
         var mockResolver = new Mock<IGroupResolver>();
         mockResolver.Setup(g => g.GetSID(It.IsAny<string>())).Returns("");
 
@@ -189,7 +212,7 @@ public class CommandServiceTests
     public void GetScriptCmd_CalledTwice_ReturnsSameInstance()
     {
         var svc = new CommandService();
-        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "config.json"));
+        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "webjea.json"));
         var mockResolver = new Mock<IGroupResolver>();
         mockResolver.Setup(g => g.GetSID(It.IsAny<string>())).Returns("");
 
@@ -209,7 +232,7 @@ public class CommandServiceTests
     public void GetOnloadCmd_CommandWithOnloadScript_ReturnsNonNull()
     {
         var svc = new CommandService();
-        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "config.json"));
+        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "webjea.json"));
         var mockResolver = new Mock<IGroupResolver>();
         mockResolver.Setup(g => g.GetSID(It.IsAny<string>())).Returns("");
 
@@ -225,7 +248,7 @@ public class CommandServiceTests
     public void GetOnloadCmd_CommandWithoutOnloadScript_ReturnsNothing()
     {
         var svc = new CommandService();
-        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "config.json"));
+        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "webjea.json"));
         var mockResolver = new Mock<IGroupResolver>();
         mockResolver.Setup(g => g.GetSID(It.IsAny<string>())).Returns("");
 
@@ -240,7 +263,7 @@ public class CommandServiceTests
     public void GetOnloadCmd_ScriptIsOnloadScriptPath()
     {
         var svc = new CommandService();
-        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "config.json"));
+        var configPath = Path.GetFullPath(Path.Combine(TestScriptsPath, "webjea.json"));
         var mockResolver = new Mock<IGroupResolver>();
         mockResolver.Setup(g => g.GetSID(It.IsAny<string>())).Returns("");
 

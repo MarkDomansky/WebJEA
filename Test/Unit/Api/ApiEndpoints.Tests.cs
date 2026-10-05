@@ -10,7 +10,7 @@ namespace WebJEA.Tests.Api;
 
 /// <summary>
 /// Hosts the real app (Development environment + DevAutoLogin) against the Test/Scripts
-/// fixtures, with the fixture config's basepath rewritten to the local checkout.
+/// fixtures, with the fixture config's BasePath rewritten to the local checkout.
 /// </summary>
 public class WebJeaApiFactory : WebApplicationFactory<Program>
 {
@@ -20,8 +20,8 @@ public class WebJeaApiFactory : WebApplicationFactory<Program>
     {
         string testScripts = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Scripts"));
 
-        var config = JObject.Parse(File.ReadAllText(Path.Combine(testScripts, "config.json")));
-        config["basepath"] = testScripts;
+        var config = JObject.Parse(File.ReadAllText(Path.Combine(testScripts, "webjea.json")));
+        config["BasePath"] = testScripts;
 
         ConfigPath = Path.Combine(Path.GetTempPath(), "webjea-apitest-" + Guid.NewGuid().ToString("N") + ".json");
         File.WriteAllText(ConfigPath, config.ToString());
@@ -37,7 +37,7 @@ public class WebJeaApiFactory : WebApplicationFactory<Program>
                 ["WebJEA:ConfigFile"] = ConfigPath,
                 ["WebJEA:DevAutoLogin"] = "true",
                 ["DevUser:Name"] = @"DEV\tester",
-                // matches the fixture config's root permittedgroups, making the dev user global
+                // matches the fixture config's root PermittedGroups, making the dev user global
                 ["DevUser:Sids:0"] = "Domain Admins"
             });
         });

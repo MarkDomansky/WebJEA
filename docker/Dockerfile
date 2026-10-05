@@ -21,7 +21,7 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
 COPY --from=build /app/publish .
 
-# /webjea/scripts holds config.json and the PowerShell scripts; /webjea/logs
+# /webjea/scripts holds webjea.json and the PowerShell scripts; /webjea/logs
 # receives the NLog output (WEBJEA_LOG_DIR is read by the shipped NLog.config).
 RUN mkdir -p /webjea/scripts /webjea/logs && chown -R $APP_UID /webjea
 VOLUME ["/webjea/scripts", "/webjea/logs"]
@@ -29,7 +29,7 @@ VOLUME ["/webjea/scripts", "/webjea/logs"]
 ENV ASPNETCORE_URLS=http://+:8080 \
     ASPNETCORE_FORWARDEDHEADERS_ENABLED=true \
     WEBJEA_LOG_DIR=/webjea/logs \
-    WebJEA__ConfigFile=/webjea/scripts/config.json \
+    WebJEA__ConfigFile=/webjea/scripts/webjea.json \
     Authentication__Mode=Entra
 
 EXPOSE 8080

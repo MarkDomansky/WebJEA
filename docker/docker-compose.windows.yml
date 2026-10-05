@@ -2,7 +2,7 @@
 # Windows-container mode:
 #   docker compose -f docker-compose.windows.yml up -d
 #
-# Put your config.json and scripts in .\scripts before starting (see
+# Put your webjea.json and scripts in .\scripts before starting (see
 # docs/docker.md).
 #
 # Windows (Negotiate) authentication requires the container to run with a gMSA

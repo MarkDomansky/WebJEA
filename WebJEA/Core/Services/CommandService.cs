@@ -25,7 +25,7 @@ public class CommandService
 
     public void LoadConfig(string configFilePath, IGroupResolver grpfinder)
     {
-        string configstr = Helpers.GetFileContent(configFilePath);
+        string configstr = Helpers.GetFileContent(ResolveConfigFilePath(configFilePath));
         try
         {
             _config = JsonConvert.DeserializeObject<Config>(configstr);
@@ -43,6 +43,30 @@ public class CommandService
         {
             throw new Exception("Could not initialize groups", ex);
         }
+    }
+
+    public const string LegacyConfigFileName = "config.json";
+
+    /// <summary>
+    /// The config file was named config.json before it became webjea.json. When the
+    /// configured file is absent but a config.json sits beside it, use that, so installs
+    /// and Docker volumes that predate the rename keep working.
+    /// </summary>
+    private string ResolveConfigFilePath(string configFilePath)
+    {
+        if (string.IsNullOrEmpty(configFilePath) || File.Exists(configFilePath))
+        {
+            return configFilePath;
+        }
+
+        string legacyPath = Path.Combine(Path.GetDirectoryName(configFilePath) ?? "", LegacyConfigFileName);
+        if (!File.Exists(legacyPath))
+        {
+            return configFilePath;
+        }
+
+        dlog.Warn("Config file " + configFilePath + " not found. Using " + legacyPath + " instead. Rename it to " + Path.GetFileName(configFilePath) + ".");
+        return legacyPath;
     }
 
     public string ResolveCommandId(IUserContext uinfo, string requestedId)

@@ -12,6 +12,6 @@ public class Config : IConfigProvider
     public bool ShowVerbose { get; set; } = true;
     public List<string> PermittedGroups { get; set; } = new List<string>();
 
-    /// <summary>Accepted for schema compatibility (Legacy|Markdown); no renderer branches on it yet.</summary>
+    /// <summary>Accepted for schema compatibility (Legacy|Markdown|Link); no renderer branches on it yet.</summary>
     public string RenderMode { get; set; } = "Legacy";
 }
