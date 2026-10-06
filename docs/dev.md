@@ -23,11 +23,11 @@ Required (in the Development environment only):
 
 ## How it works
 
-Every HTTP request is authenticated as the configured `DevUser`, regardless of any actual identity provider. The configured `Name` and `Sids` are used for authorization checks against your `config.json` `PermittedGroups`.
+Every HTTP request is authenticated as the configured `DevUser`, regardless of any actual identity provider. The configured `Name` and `Sids` are used for authorization checks against your `webjea.json` `PermittedGroups`.
 
 ## Authorization matching
 
-In this mode, group names from `PermittedGroups` in your `config.json` are matched **literally** against the entries in `DevUser:Sids`. For example:
+In this mode, group names from `PermittedGroups` in your `webjea.json` are matched **literally** against the entries in `DevUser:Sids`. For example:
 
 ```json
 {
@@ -36,7 +36,7 @@ In this mode, group names from `PermittedGroups` in your `config.json` are match
 ```
 
 ```javascript
-// config.json
+// webjea.json
 {
   "PermittedGroups": [ "Domain Admins", "Finance", "HR" ]
 }

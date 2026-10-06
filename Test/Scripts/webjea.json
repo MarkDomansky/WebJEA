@@ -1,0 +1,376 @@
+{
+  "$schema": "https://www.schemastore.org/webjea.json",
+  "Title": "Config Title",
+  "DashboardHtml": "<b>WebJEA is now installed!</b>",
+  "BasePath": "C:\\prj\\webjea\\test\\scripts",
+  "LogParameters": true,
+  "PermittedGroups": [ "Domain Admins" ],
+  "Commands": [
+    {
+      "Id": "validate",
+      "DisplayName": "Overview",
+      "Synopsis": "Overview of features <i>with examples</i>",
+      "Script": "validate.ps1",
+      "OnloadScript": "validate-onload.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "onload",
+      "DisplayName": "onload",
+      "OnloadScript": "onload.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "onload-mandatory",
+      "DisplayName": "onload-mandatory",
+      "OnloadScript": "onload-mandatory.ps1",
+      "PermittedGroups": [
+        "*"
+      ]
+    },
+    {
+      "Id": "doubleclicktest",
+      "DisplayName": "doubleclicktest",
+      "Script": "doubleclicktest.ps1",
+      "PermittedGroups": [
+        "*"
+      ]
+    },
+    {
+      "Id": "utsp-boolean-true",
+      "DisplayName": "utsp-boolean-true",
+      "Script": "utsp-boolean-true.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-boolean",
+      "DisplayName": "utsp-boolean",
+      "Script": "utsp-boolean.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-cred-credential",
+      "DisplayName": "utsp-cred-credential",
+      "Script": "utsp-cred-credential.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-cred-pscredential",
+      "DisplayName": "utsp-cred-pscredential",
+      "Script": "utsp-cred-pscredential.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-cred-securestring",
+      "DisplayName": "utsp-cred-securestring",
+      "Script": "utsp-cred-securestring.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-dateonly",
+      "DisplayName": "utsp-dateonly",
+      "Script": "utsp-dateonly.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-datetime",
+      "DisplayName": "utsp-datetime",
+      "Script": "utsp-datetime.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-EmptyScript",
+      "DisplayName": "utsp-EmptyScript",
+      "Script": "utsp-EmptyScript.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-float-decimal",
+      "DisplayName": "utsp-float-decimal",
+      "Script": "utsp-float-decimal.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-float-double",
+      "DisplayName": "utsp-float-double",
+      "Script": "utsp-float-double.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-float-float",
+      "DisplayName": "utsp-float-float",
+      "Script": "utsp-float-float.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-help-helpmessage",
+      "DisplayName": "utsp-help-helpmessage",
+      "Script": "utsp-help-helpmessage.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-help-parameter",
+      "DisplayName": "utsp-help-parameter",
+      "Script": "utsp-help-parameter.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-help-synopsis",
+      "DisplayName": "utsp-help-synopsis",
+      "Script": "utsp-help-synopsis.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-help-description",
+      "DisplayName": "utsp-help-description",
+      "Script": "utsp-help-description.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-help-synopsisdescription",
+      "DisplayName": "utsp-help-synopsisdescription",
+      "Script": "utsp-help-synopsisdescription.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-help-preamble",
+      "DisplayName": "utsp-help-preamble",
+      "Script": "utsp-help-preamble.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-help-htmlpayload",
+      "DisplayName": "utsp-help-htmlpayload",
+      "Script": "utsp-help-htmlpayload.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-int-array",
+      "DisplayName": "utsp-int-array",
+      "Script": "utsp-int-array.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-int-int32",
+      "DisplayName": "utsp-int-int32",
+      "Script": "utsp-int-int32.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-int-uint16",
+      "DisplayName": "utsp-int-uint16",
+      "Script": "utsp-int-uint16.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-int",
+      "DisplayName": "utsp-int",
+      "Script": "utsp-int.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-InvalidScript",
+      "DisplayName": "utsp-InvalidScript",
+      "Script": "utsp-InvalidScript.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-noparamblock",
+      "DisplayName": "utsp-noparamblock",
+      "Script": "utsp-noparamblock.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-noparams",
+      "DisplayName": "utsp-noparams",
+      "Script": "utsp-noparams.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-string-array",
+      "DisplayName": "utsp-string-array",
+      "Script": "utsp-string-array.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-string",
+      "DisplayName": "utsp-string",
+      "Script": "utsp-string.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-switch",
+      "DisplayName": "utsp-switch",
+      "Script": "utsp-switch.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-validatecount",
+      "DisplayName": "utsp-validatecount",
+      "Script": "utsp-validatecount.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-validatelength",
+      "DisplayName": "utsp-validatelength",
+      "Script": "utsp-validatelength.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-validatenotnull",
+      "DisplayName": "utsp-validatenotnull",
+      "Script": "utsp-validatenotnull.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-validatenotnullorempty",
+      "DisplayName": "utsp-validatenotnullorempty",
+      "Script": "utsp-validatenotnullorempty.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-validatepattern",
+      "DisplayName": "utsp-validatepattern",
+      "Script": "utsp-validatepattern.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-validaterange",
+      "DisplayName": "utsp-validaterange",
+      "Script": "utsp-validaterange.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-validatescript",
+      "DisplayName": "utsp-validatescript",
+      "Script": "utsp-validatescript.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-validateset",
+      "DisplayName": "utsp-validateset",
+      "Script": "utsp-validateset.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-webjeahostname",
+      "DisplayName": "utsp-webjeahostname",
+      "Script": "utsp-webjeahostname.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utsp-webjeausername",
+      "DisplayName": "utsp-webjeausername",
+      "Script": "utsp-webjeausername.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utwp-base",
+      "DisplayName": "utwp-base",
+      "Script": "utwp-base.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utwp-debug",
+      "DisplayName": "utwp-debug",
+      "Script": "utwp-debug.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utwp-error",
+      "DisplayName": "utwp-error",
+      "Script": "utwp-error.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utwp-ErrorWithLink",
+      "DisplayName": "utwp-ErrorWithLink",
+      "Script": "utwp-ErrorWithLink.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utwp-host",
+      "DisplayName": "utwp-host",
+      "Script": "utwp-host.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utwp-ImageInLink",
+      "DisplayName": "utwp-ImageInLink",
+      "Script": "utwp-ImageInLink.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utwp-ImageWithClass",
+      "DisplayName": "utwp-ImageWithClass",
+      "Script": "utwp-ImageWithClass.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utwp-info",
+      "DisplayName": "utwp-info",
+      "Script": "utwp-info.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utwp-link",
+      "DisplayName": "utwp-link",
+      "Script": "utwp-link.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utwp-logmessage",
+      "DisplayName": "utwp-logmessage",
+      "Script": "utwp-logmessage.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utwp-monospacing",
+      "DisplayName": "utwp-monospacing",
+      "Script": "utwp-monospacing.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utwp-nohtml",
+      "DisplayName": "utwp-nohtml",
+      "Script": "utwp-nohtml.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utwp-output-object",
+      "DisplayName": "utwp-output-object",
+      "Script": "utwp-output-object.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utwp-progress",
+      "DisplayName": "utwp-progress",
+      "Script": "utwp-progress.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utwp-span",
+      "DisplayName": "utwp-span",
+      "Script": "utwp-span.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utwp-throw",
+      "DisplayName": "utwp-throw",
+      "Script": "utwp-throw.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utwp-verbose",
+      "DisplayName": "utwp-verbose",
+      "Script": "utwp-verbose.ps1",
+      "PermittedGroups": [ "*" ]
+    },
+    {
+      "Id": "utwp-warning",
+      "DisplayName": "utwp-warning",
+      "Script": "utwp-warning.ps1",
+      "PermittedGroups": [ "*" ]
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 # WebJEA on Linux containers. Run from this folder:
 #   docker compose up -d
 #
-# Put your config.json and scripts in ./scripts before starting (see
+# Put your webjea.json and scripts in ./scripts before starting (see
 # docs/docker.md). Linux hosting requires Entra ID authentication.
 services:
   webjea:

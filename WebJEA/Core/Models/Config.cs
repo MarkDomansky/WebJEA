@@ -10,8 +10,9 @@ public class Config : IConfigProvider
     public string HtmlLanguage { get; set; } = "en-US";
     public string DashboardHtml { get; set; }
     public bool ShowVerbose { get; set; } = true;
+    [Newtonsoft.Json.JsonConverter(typeof(SingleOrListConverter))]
     public List<string> PermittedGroups { get; set; } = new List<string>();
 
-    /// <summary>Accepted for schema compatibility (Legacy|Markdown); no renderer branches on it yet.</summary>
+    /// <summary>Accepted for schema compatibility (Legacy|Markdown|Link); no renderer branches on it yet.</summary>
     public string RenderMode { get; set; } = "Legacy";
 }

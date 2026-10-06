@@ -218,7 +218,7 @@ function Step_CopyAndSettings([int]$HttpPort, [int]$HttpsPort, [string]$PortNote
         '  CertThumbprint      = thumbprint from the cert step (when HttpsPort > 0;'
         '                        HTTP is then redirected to HTTPS automatically)'
         '  SitePath            = C:\inetpub\webjea   (app binaries; default is fine)'
-        '  ScriptsPath         = C:\webjea           (config.json + your .ps1 scripts)'
+        '  ScriptsPath         = C:\webjea           (webjea.json + your .ps1 scripts)'
         '  LogPath             = C:\webjea           (webjea.log / webjea-usage.log)'
     )
     if ($PortNote) { $body += ''; $body += $PortNote }
@@ -297,8 +297,8 @@ function Step_VerifyService([int]$HttpPort, [int]$HttpsPort, [bool]$Core)
     $httpUrl = "http://${fqdn}$(if ($HttpPort -ne 80) { ":$HttpPort" })/"
     $body = @(
         'Confirm the service end to end. The starter config permits the local'
-        'Administrators group (permittedgroups ".\Administrators"), so test with an'
-        'account in that group or edit C:\webjea\config.json permittedgroups first.'
+        'Administrators group (PermittedGroups ".\Administrators"), so test with an'
+        'account in that group or edit C:\webjea\webjea.json PermittedGroups first.'
     )
     if ($Core)
     {
@@ -411,18 +411,18 @@ function Step_ContainerContent([string]$BasePath)
         Body   = @(
             'The compose files mount .\scripts and .\logs from the docker\ folder into'
             'the container. Seed scripts\ with the starter config and scripts, then fix'
-            'basepath and permittedgroups for the container environment.'
+            'BasePath and PermittedGroups for the container environment.'
         )
         Code   = @(
             'cd <repo-root>\docker'
             'mkdir scripts, logs'
             'Copy-Item ..\ReleaseFiles\scripts\* .\scripts\'
         )
-        Note   = ('Edit scripts\config.json: set "basepath": "{0}" and change permittedgroups from ".\\Administrators" to Entra values - a group object ID, app role value, or user UPN, or "*" for any signed-in user (lab only). See docs/entra.md Authorization modes.' -f $BasePath)
+        Note   = ('Edit scripts\webjea.json: set "BasePath": "{0}" and change PermittedGroups from ".\\Administrators" to Entra values - a group object ID, app role value, or user UPN, or "*" for any signed-in user (lab only). See docs/entra.md Authorization modes.' -f $BasePath)
         Verify = @(
-            'docker\scripts contains config.json, overview.ps1, validate.ps1'
-            "config.json basepath is $BasePath"
-            'permittedgroups contains your Entra group ID / UPN (or "*" for the lab)'
+            'docker\scripts contains webjea.json, overview.ps1, validate.ps1'
+            "webjea.json BasePath is $BasePath"
+            'PermittedGroups contains your Entra group ID / UPN (or "*" for the lab)'
         )
     }
 }

@@ -100,7 +100,7 @@ public class PSEngine : IScriptEngine
         ps.Runspace.SessionStateProxy.SetVariable("env:WebJEAHostName", WebJEAHostName);
 
         // Set execution policy to bypass for this runspace (execution policies only exist on Windows)
-        // FUTURE: Make this configurable via config.json
+        // FUTURE: Make this configurable via webjea.json
         if (OperatingSystem.IsWindows())
         {
             ps.AddScript("Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force").Invoke();

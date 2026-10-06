@@ -80,11 +80,11 @@ A demo script is included to confirm operation. Add your own scripts as describe
 
 ## Adding Scripts to WebJEA
 
-WebJEA is configured by `config.json` in your scripts folder. The file references a published JSON schema through its `$schema` line, so editors such as VS Code validate and autocomplete it as you type. Add a script by appending an entry to `Commands`:
+WebJEA is configured by `webjea.json` in your scripts folder. The file references a published JSON schema through its `$schema` line, so editors such as VS Code validate and autocomplete it as you type. Add a script by appending an entry to `Commands`:
 
 ```json
 {
-    "$schema": "https://raw.githubusercontent.com/markdomansky/WebJEA/master/schemas/webjea-config-2026-04.schema.json",
+    "$schema": "https://www.schemastore.org/webjea.json",
     "Title": "WebJEA",
     "Commands": [
         {
@@ -99,7 +99,7 @@ WebJEA is configured by `config.json` in your scripts folder. The file reference
 
 See [docs/Usage.md](docs/Usage.md) for every setting.
 
-_The WebJEAConfig PowerShell module is retired; edit `config.json` directly._
+_The WebJEAConfig PowerShell module is retired; edit `webjea.json` directly._
 
 ## Security Considerations
 
