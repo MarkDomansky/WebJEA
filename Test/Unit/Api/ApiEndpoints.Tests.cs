@@ -165,6 +165,22 @@ public class ApiEndpointsTests : IClassFixture<WebJeaApiFactory>
     }
 
     [Fact]
+    public async Task CommandMetadata_ScriptWithDescriptionHelp_ReturnsDescriptionOnEveryRequest()
+    {
+        var client = CreateClient();
+
+        // twice: the second request is served from the parsed-script cache
+        for (int i = 0; i < 2; i++)
+        {
+            var response = await client.GetAsync("/api/command/utsp-help-description");
+
+            response.EnsureSuccessStatusCode();
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Contains("Description String Check", doc.RootElement.GetProperty("description").GetString());
+        }
+    }
+
+    [Fact]
     public async Task CommandMetadata_UnknownCommand_Returns403()
     {
         var client = CreateClient();

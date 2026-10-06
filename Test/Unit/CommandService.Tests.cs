@@ -61,6 +61,52 @@ public class CommandServiceTests
     }
 
     [Fact]
+    public void LoadConfig_CommandWithDescription_LoadsAndIgnoresIt()
+    {
+        // Description is not a config setting: the schema tolerates it as an unknown
+        // property, and the app must load the file without using the value anywhere.
+        string scriptsPath = Path.GetFullPath(TestScriptsPath);
+        string configPath = Path.Combine(Path.GetTempPath(), "webjea-description-" + Guid.NewGuid().ToString("N") + ".json");
+        var config = new Newtonsoft.Json.Linq.JObject
+        {
+            ["Title"] = "t",
+            ["BasePath"] = scriptsPath,
+            ["Commands"] = new Newtonsoft.Json.Linq.JArray
+            {
+                new Newtonsoft.Json.Linq.JObject
+                {
+                    ["Id"] = "described",
+                    ["Description"] = "Description from config",
+                    ["Script"] = "utsp-help-description.ps1",
+                    ["PermittedGroups"] = "*"
+                }
+            }
+        };
+        File.WriteAllText(configPath, config.ToString());
+        try
+        {
+            var svc = new CommandService();
+            var mockResolver = new Mock<IGroupResolver>();
+            mockResolver.Setup(g => g.GetSID(It.IsAny<string>())).Returns("");
+
+            svc.LoadConfig(configPath, mockResolver.Object);
+
+            ConfigCmd cmd = Assert.Single(svc.Config.Commands);
+            Assert.Equal("described", cmd.ID);
+            Assert.Null(cmd.GetMenuItem().Description);
+
+            PSCmd scriptCmd = svc.GetScriptCmd("described");
+            var metadata = new FormMetadataBuilder().Build(cmd, scriptCmd, null, svc.Config.Title, false);
+            Assert.Contains("Description String Check", metadata.Description);
+            Assert.DoesNotContain("Description from config", metadata.Description);
+        }
+        finally
+        {
+            File.Delete(configPath);
+        }
+    }
+
+    [Fact]
     public void LoadConfig_ConfiguredFileMissing_FallsBackToLegacyConfigJson()
     {
         string dir = Path.Combine(Path.GetTempPath(), "webjea-legacyconfig-" + Guid.NewGuid().ToString("N"));

@@ -402,7 +402,6 @@ public class AuthorizationServiceTests
         var cmd = new ConfigCmd();
         cmd.ID = "cmd1";
         cmd.DisplayName = "Command 1";
-        cmd.Description = "Description 1";
         cmd.PermittedGroups = new List<string> { "Users" };
 
         var config = CreateConfig(
@@ -428,7 +427,6 @@ public class AuthorizationServiceTests
         var cmd = new ConfigCmd();
         cmd.ID = "cmd1";
         cmd.DisplayName = "Command 1";
-        cmd.Description = "Description 1";
         cmd.PermittedGroups = new List<string> { "Users" };
 
         var config = CreateConfig(
@@ -452,7 +450,6 @@ public class AuthorizationServiceTests
         var cmd = new ConfigCmd();
         cmd.ID = "cmd1";
         cmd.DisplayName = "Command 1";
-        cmd.Description = "Description 1";
         cmd.PermittedGroups = new List<string> { "Users" };
 
         var config = CreateConfig(

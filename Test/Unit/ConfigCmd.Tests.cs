@@ -44,13 +44,11 @@ public class ConfigCmdTests
         var cmd = new ConfigCmd();
         cmd.ID = "test-cmd";
         cmd.DisplayName = "Test Command";
-        cmd.Description = "A test command";
 
         var mi = cmd.GetMenuItem();
 
         Assert.Equal("test-cmd", mi.ID);
         Assert.Equal("Test Command", mi.DisplayName);
-        Assert.Equal("A test command", mi.Description);
     }
 
     [Fact]
@@ -121,7 +119,6 @@ public class ConfigCmdTests
         cmd.ID = "rt-cmd";
         cmd.DisplayName = "Round Trip";
         cmd.Synopsis = "Synopsis text";
-        cmd.Description = "Description text";
         cmd.Script = "script.ps1";
         cmd.OnloadScript = "onload.ps1";
         cmd.LogParameters = true;
@@ -130,7 +127,6 @@ public class ConfigCmdTests
         Assert.Equal("rt-cmd", cmd.ID);
         Assert.Equal("Round Trip", cmd.DisplayName);
         Assert.Equal("Synopsis text", cmd.Synopsis);
-        Assert.Equal("Description text", cmd.Description);
         Assert.Equal("script.ps1", cmd.Script);
         Assert.Equal("onload.ps1", cmd.OnloadScript);
         Assert.True(cmd.LogParameters);

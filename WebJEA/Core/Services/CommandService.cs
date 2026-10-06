@@ -117,11 +117,6 @@ public class CommandService
             configCmd.Synopsis = pscmd.ParsedSynopsis;
         }
 
-        if (string.IsNullOrEmpty(configCmd.Description))
-        {
-            configCmd.Description = pscmd.ParsedDescription;
-        }
-
         _scriptCmds[cmdid] = pscmd;
         return pscmd;
     }
