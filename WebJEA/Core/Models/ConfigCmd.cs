@@ -21,7 +21,7 @@ public class ConfigCmd
     public string ID
     {
         get => prvID;
-        set => prvID = value?.ToLower();
+        set => prvID = value?.ToLowerInvariant();
     }
 
     public MenuItem GetMenuItem()
