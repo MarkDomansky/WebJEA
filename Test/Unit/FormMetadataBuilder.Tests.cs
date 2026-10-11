@@ -47,6 +47,33 @@ public class FormMetadataBuilderTests
         Assert.Empty(dto.Parameters);
     }
 
+    [Theory]
+    [InlineData(true, true, true)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, false)]
+    public void Build_ShowVerbose_RequiresGlobalUserAndSetting(bool isGlobalUser, bool showVerbose, bool expected)
+    {
+        var cmd = new ConfigCmd { ID = "test" };
+
+        var dto = new FormMetadataBuilder().Build(cmd, null, null, "Title", isGlobalUser, showVerbose);
+
+        Assert.Equal(expected, dto.ShowVerbose);
+    }
+
+    [Theory]
+    [InlineData("Markdown", "Link", "Markdown")]
+    [InlineData(null, "Link", "Link")]
+    [InlineData(null, null, "Legacy")]
+    public void Build_RenderMode_CommandThenGlobalThenLegacy(string cmdRenderMode, string globalRenderMode, string expected)
+    {
+        var cmd = new ConfigCmd { ID = "test", RenderMode = cmdRenderMode };
+
+        var dto = new FormMetadataBuilder().Build(cmd, null, null, "Title", false, true, globalRenderMode);
+
+        Assert.Equal(expected, dto.RenderMode);
+    }
+
     [Fact]
     public void Build_DisplayNameFallsBackToId()
     {

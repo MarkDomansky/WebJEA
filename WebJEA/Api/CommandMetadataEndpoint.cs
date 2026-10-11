@@ -55,7 +55,8 @@ public static class CommandMetadataEndpoint
 
         bool isGlobalUser = cmdSvc.Auth.IsGlobalUser(uinfo);
         CommandMetadataDto metadata = new FormMetadataBuilder()
-            .Build(cmd, scriptCmd, onloadCmd, cmdSvc.Config.Title, isGlobalUser);
+            .Build(cmd, scriptCmd, onloadCmd, cmdSvc.Config.Title, isGlobalUser,
+                   cmdSvc.Config.ShowVerbose, cmdSvc.Config.RenderMode);
 
         if (cmdSvc.Config.SendTelemetry)
         {

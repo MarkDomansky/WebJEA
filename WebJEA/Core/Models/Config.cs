@@ -2,7 +2,7 @@ namespace WebJEA;
 
 public class Config : IConfigProvider
 {
-    public string Title { get; set; }
+    public string Title { get; set; } = "WebJEA";
     public bool LogParameters { get; set; } = true;
     public List<ConfigCmd> Commands { get; set; }
     public string BasePath { get; set; }
