@@ -106,6 +106,90 @@ public class CommandServiceTests
         }
     }
 
+    private static Exception LoadConfigWithCommands(params Newtonsoft.Json.Linq.JObject[] commands)
+    {
+        string configPath = Path.Combine(Path.GetTempPath(), "webjea-ids-" + Guid.NewGuid().ToString("N") + ".json");
+        var config = new Newtonsoft.Json.Linq.JObject
+        {
+            ["Commands"] = new Newtonsoft.Json.Linq.JArray(commands)
+        };
+        File.WriteAllText(configPath, config.ToString());
+        try
+        {
+            var svc = new CommandService();
+            var mockResolver = new Mock<IGroupResolver>();
+            mockResolver.Setup(g => g.GetSID(It.IsAny<string>())).Returns("");
+
+            return Record.Exception(() => svc.LoadConfig(configPath, mockResolver.Object));
+        }
+        finally
+        {
+            File.Delete(configPath);
+        }
+    }
+
+    [Fact]
+    public void LoadConfig_NoTitle_DefaultsToWebJEA()
+    {
+        string configPath = Path.Combine(Path.GetTempPath(), "webjea-notitle-" + Guid.NewGuid().ToString("N") + ".json");
+        File.WriteAllText(configPath, "{ \"Commands\": [ { \"Id\": \"one\" } ] }");
+        try
+        {
+            var svc = new CommandService();
+            var mockResolver = new Mock<IGroupResolver>();
+            mockResolver.Setup(g => g.GetSID(It.IsAny<string>())).Returns("");
+
+            svc.LoadConfig(configPath, mockResolver.Object);
+
+            Assert.Equal("WebJEA", svc.Config.Title);
+        }
+        finally
+        {
+            File.Delete(configPath);
+        }
+    }
+
+    [Fact]
+    public void LoadConfig_UniqueIds_Loads()
+    {
+        Exception ex = LoadConfigWithCommands(
+            new Newtonsoft.Json.Linq.JObject { ["Id"] = "one" },
+            new Newtonsoft.Json.Linq.JObject { ["Id"] = "two" });
+
+        Assert.Null(ex);
+    }
+
+    [Theory]
+    [InlineData("same", "same")]
+    [InlineData("Same", "sAME")]
+    public void LoadConfig_DuplicateIds_ThrowsNamingTheId(string first, string second)
+    {
+        Exception ex = LoadConfigWithCommands(
+            new Newtonsoft.Json.Linq.JObject { ["Id"] = first },
+            new Newtonsoft.Json.Linq.JObject { ["Id"] = second });
+
+        Assert.NotNull(ex);
+        Assert.Contains("Duplicate command Id 'same'", ex.InnerException.Message);
+    }
+
+    [Fact]
+    public void LoadConfig_EmptyId_Throws()
+    {
+        Exception ex = LoadConfigWithCommands(new Newtonsoft.Json.Linq.JObject { ["Id"] = "" });
+
+        Assert.NotNull(ex);
+        Assert.Contains("non-empty Id", ex.InnerException.Message);
+    }
+
+    [Fact]
+    public void LoadConfig_MissingId_Throws()
+    {
+        Exception ex = LoadConfigWithCommands(new Newtonsoft.Json.Linq.JObject { ["DisplayName"] = "No Id" });
+
+        Assert.NotNull(ex);
+        Assert.Contains("non-empty Id", ex.InnerException.Message);
+    }
+
     [Fact]
     public void LoadConfig_ConfiguredFileMissing_FallsBackToLegacyConfigJson()
     {

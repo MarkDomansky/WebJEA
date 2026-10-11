@@ -16,12 +16,21 @@ public class WebJeaApiFactory : WebApplicationFactory<Program>
 {
     public string ConfigPath { get; }
 
-    public WebJeaApiFactory()
+    private readonly string _devSid;
+
+    // matches the fixture config's root PermittedGroups, making the dev user global
+    public WebJeaApiFactory() : this(null, "Domain Admins")
     {
+    }
+
+    protected WebJeaApiFactory(Action<JObject> customizeConfig, string devSid)
+    {
+        _devSid = devSid;
         string testScripts = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Scripts"));
 
         var config = JObject.Parse(File.ReadAllText(Path.Combine(testScripts, "webjea.json")));
         config["BasePath"] = testScripts;
+        customizeConfig?.Invoke(config);
 
         ConfigPath = Path.Combine(Path.GetTempPath(), "webjea-apitest-" + Guid.NewGuid().ToString("N") + ".json");
         File.WriteAllText(ConfigPath, config.ToString());
@@ -37,8 +46,7 @@ public class WebJeaApiFactory : WebApplicationFactory<Program>
                 ["WebJEA:ConfigFile"] = ConfigPath,
                 ["WebJEA:DevAutoLogin"] = "true",
                 ["DevUser:Name"] = @"DEV\tester",
-                // matches the fixture config's root PermittedGroups, making the dev user global
-                ["DevUser:Sids:0"] = "Domain Admins"
+                ["DevUser:Sids:0"] = _devSid
             });
         });
     }
@@ -53,6 +61,114 @@ public class WebJeaApiFactory : WebApplicationFactory<Program>
         catch
         {
         }
+    }
+}
+
+/// <summary>Global dev user, but the config turns ShowVerbose off and drops Title.</summary>
+public class ShowVerboseOffApiFactory : WebJeaApiFactory
+{
+    public ShowVerboseOffApiFactory() : base(config =>
+    {
+        config["ShowVerbose"] = false;
+        config.Remove("Title");
+    }, "Domain Admins")
+    {
+    }
+}
+
+/// <summary>Dev user outside the global PermittedGroups; commands open to "*" stay available.</summary>
+public class NonGlobalApiFactory : WebJeaApiFactory
+{
+    public NonGlobalApiFactory() : base(null, "Nobody")
+    {
+    }
+}
+
+public class VerboseAccessTests : IClassFixture<WebJeaApiFactory>, IClassFixture<ShowVerboseOffApiFactory>, IClassFixture<NonGlobalApiFactory>
+{
+    // utwp-verbose.ps1 writes this line before it raises VerbosePreference itself,
+    // so it only reaches the output when the request ran with verbose enabled.
+    private const string VerboseOnlyLine = "Before setting VerbosePreference";
+
+    private readonly WebJeaApiFactory _global;
+    private readonly ShowVerboseOffApiFactory _showVerboseOff;
+    private readonly NonGlobalApiFactory _nonGlobal;
+
+    public VerboseAccessTests(WebJeaApiFactory global, ShowVerboseOffApiFactory showVerboseOff, NonGlobalApiFactory nonGlobal)
+    {
+        _global = global;
+        _showVerboseOff = showVerboseOff;
+        _nonGlobal = nonGlobal;
+    }
+
+    private static async Task<string> ExecuteVerbose(WebJeaApiFactory factory)
+    {
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var response = await client.PostAsync("/api/execute",
+            new StringContent("{\"cmdid\":\"utwp-verbose\",\"parameters\":{},\"verbose\":true}", Encoding.UTF8, "application/json"));
+
+        Assert.Equal(200, (int)response.StatusCode);
+        return await response.Content.ReadAsStringAsync();
+    }
+
+    private static async Task<JsonElement> GetJson(WebJeaApiFactory factory, string url)
+    {
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var response = await client.GetAsync(url);
+
+        response.EnsureSuccessStatusCode();
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return doc.RootElement.Clone();
+    }
+
+    [Fact]
+    public async Task Execute_VerboseRequested_GlobalUser_ReturnsVerboseOutput()
+    {
+        Assert.Contains(VerboseOnlyLine, await ExecuteVerbose(_global));
+    }
+
+    [Fact]
+    public async Task Execute_VerboseRequested_ShowVerboseOff_IsIgnored()
+    {
+        Assert.DoesNotContain(VerboseOnlyLine, await ExecuteVerbose(_showVerboseOff));
+    }
+
+    [Fact]
+    public async Task Execute_VerboseRequested_NonGlobalUser_IsIgnored()
+    {
+        Assert.DoesNotContain(VerboseOnlyLine, await ExecuteVerbose(_nonGlobal));
+    }
+
+    [Fact]
+    public async Task CommandMetadata_ShowVerboseOff_HidesVerboseFromGlobalUser()
+    {
+        JsonElement root = await GetJson(_showVerboseOff, "/api/command/utwp-verbose");
+
+        Assert.False(root.GetProperty("showVerbose").GetBoolean());
+    }
+
+    [Fact]
+    public async Task CommandMetadata_NonGlobalUser_HidesVerbose()
+    {
+        JsonElement root = await GetJson(_nonGlobal, "/api/command/utwp-verbose");
+
+        Assert.False(root.GetProperty("showVerbose").GetBoolean());
+    }
+
+    [Fact]
+    public async Task CommandMetadata_NoRenderModeConfigured_ReturnsLegacy()
+    {
+        JsonElement root = await GetJson(_global, "/api/command/utwp-verbose");
+
+        Assert.Equal("Legacy", root.GetProperty("renderMode").GetString());
+    }
+
+    [Fact]
+    public async Task Config_NoTitle_ReturnsWebJEA()
+    {
+        JsonElement root = await GetJson(_showVerboseOff, "/api/config");
+
+        Assert.Equal("WebJEA", root.GetProperty("title").GetString());
     }
 }
 
