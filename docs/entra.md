@@ -85,13 +85,13 @@ To make Entra reject sign-ins from anyone not explicitly assigned to WebJEA (def
 
 ## Authorization modes
 
-`PermittedGroups` (global and per-command in `config.json`) accepts three kinds of entries. Choose one or combine them. All matching is case-insensitive.
+`PermittedGroups` (global and per-command in `webjea.json`) accepts three kinds of entries. Choose one or combine them. All matching is case-insensitive.
 
 ### Mode 1: Entra security groups
 
 Most common. Requires the **groups claim** from [Step 3](#step-3-add-the-groups-claim) above.
 
-In `config.json`, use the Entra group **object IDs** (the GUID on the group's overview page):
+In `webjea.json`, use the Entra group **object IDs** (the GUID on the group's overview page):
 
 ```json
 {
@@ -126,7 +126,7 @@ The signed-in user's UPN and object ID are matched against these entries. Useful
 
 ### Mode 3: App roles (recommended)
 
-App roles let you define WebJEA-specific authorization directly in the app registration — no tenant-wide groups, no GUIDs in `config.json`, and no group-overage problems (app role claims are always emitted, regardless of how many groups the user is in).
+App roles let you define WebJEA-specific authorization directly in the app registration — no tenant-wide groups, no GUIDs in `webjea.json`, and no group-overage problems (app role claims are always emitted, regardless of how many groups the user is in).
 
 #### Create the roles
 
@@ -154,7 +154,7 @@ Notes:
 - Assignment requires an admin (Application Administrator or higher); users cannot self-assign.
 - No token configuration is needed: assigned role **values** automatically appear in the token's `roles` claim at the user's next sign-in.
 
-#### Use the role values in config.json
+#### Use the role values in webjea.json
 
 ```json
 {
@@ -177,7 +177,7 @@ WebJEA matches the `roles` claim values against `PermittedGroups` entries (case-
 Trade-offs versus groups:
 
 - **Pro**: readable config (no GUIDs), per-app scoping, immune to group overage, and role assignments are visible in one place (the enterprise app).
-- **Con**: role values are free-text — a typo in `config.json` or in the role's **Value** silently denies access; there is no "unknown role" warning because WebJEA cannot distinguish a role value from a UPN.
+- **Con**: role values are free-text — a typo in `webjea.json` or in the role's **Value** silently denies access; there is no "unknown role" warning because WebJEA cannot distinguish a role value from a UPN.
 
 ### Combining modes
 

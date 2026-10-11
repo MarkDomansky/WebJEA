@@ -15,8 +15,8 @@ public class PathBaseFactory : WebApplicationFactory<Program>
     public PathBaseFactory()
     {
         string testScripts = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Scripts"));
-        var config = JObject.Parse(File.ReadAllText(Path.Combine(testScripts, "config.json")));
-        config["basepath"] = testScripts;
+        var config = JObject.Parse(File.ReadAllText(Path.Combine(testScripts, "webjea.json")));
+        config["BasePath"] = testScripts;
         ConfigPath = Path.Combine(Path.GetTempPath(), "webjea-pathbase-" + Guid.NewGuid().ToString("N") + ".json");
         File.WriteAllText(ConfigPath, config.ToString());
     }

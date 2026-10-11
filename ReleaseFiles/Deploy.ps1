@@ -151,13 +151,13 @@ begin
     function Step_JsonStringValue([string]$Path, [string]$Key, [string]$Value, [string]$Label)
     {
         #Sets one top-level string key in a JSON file, editing the TEXT rather than
-        #round-tripping the object. config.json is the admin's file - they add commands,
+        #round-tripping the object. webjea.json is the admin's file - they add commands,
         #comments and their own formatting to it - and ConvertFrom-Json | ConvertTo-Json
         #would reformat the whole thing on every change, and silently flatten anything
         #nested deeper than -Depth into literal "System.Object[]" strings. A targeted
         #replacement of the one value leaves every other byte (BOM included) alone.
-        #The key is matched case-insensitively on purpose: the shipped file spells it
-        #'basepath' while this script asks for 'basePath', and JSON itself is
+        #The key is matched case-insensitively on purpose: files from older releases spell it
+        #'basepath' while this script asks for 'BasePath', and JSON itself is
         #case-sensitive - matching exactly would append a SECOND key rather than update
         #the existing one.
         $pattern = '(?i)("' + [regex]::Escape($Key) + '"\s*:\s*)"(?:[^"\\]|\\.)*"'
@@ -291,7 +291,7 @@ begin
         ##################################################
         #set json config location in appsettings.Production.json
         Step_AppSettingsProperty -SitePath $settings.SitePath -Section 'WebJEA' -Name 'ConfigFile' `
-            -Value "$($settings.ScriptsPath)\config.json"
+            -Value "$($settings.ScriptsPath)\webjea.json"
 
         #Kestrel listeners: the app reads these at startup (0 disables a listener).
         #[int]$null is 0, so a missing/null port key disables that listener.
@@ -381,6 +381,21 @@ begin
                     if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit code $LASTEXITCODE while copying starter scripts" }
                 }.GetNewClosure()
             }
+        }
+
+        #The config file was named config.json before it became webjea.json. An upgrade
+        #keeps the admin's existing ScriptsPath, so carry their file over to the new name.
+        #Never overwrites: if webjea.json is already there, config.json is left alone.
+        $legacyConfig = "$($settings.ScriptsPath)\config.json"
+        $currentConfig = "$($settings.ScriptsPath)\webjea.json"
+        @{
+            Description = 'config.json renamed to webjea.json'
+            TestScript  = {
+                (Test-Path -Path $currentConfig -PathType Leaf) -or -not (Test-Path -Path $legacyConfig -PathType Leaf)
+            }.GetNewClosure()
+            SetScript   = {
+                Rename-Item -Path $legacyConfig -NewName 'webjea.json'
+            }.GetNewClosure()
         }
 
     }
@@ -590,10 +605,10 @@ begin
     function GetSteps_WebJEA($Settings)
     {
         @{ Description = '***** Configuring WebJEA Specific Settings *****' }
-        #Update config.json basepath property
-        Step_JsonStringValue -Path "$($settings.ScriptsPath)\config.json" `
-            -Key 'basepath' -Value $settings.ScriptsPath `
-            -Label 'basepath in config.json is set to the scripts folder'
+        #Update webjea.json BasePath property
+        Step_JsonStringValue -Path "$($settings.ScriptsPath)\webjea.json" `
+            -Key 'BasePath' -Value $settings.ScriptsPath `
+            -Label 'BasePath in webjea.json is set to the scripts folder'
 
     }
     function GetSteps_Finalize($Settings)

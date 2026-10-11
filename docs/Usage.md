@@ -2,7 +2,7 @@
 
 ## Concepts
 
-* WebJEA is controlled by a JSON configuration file, `config.json`, located in your scripts folder (the `ScriptsPath` you chose during [installation](Installation.md), e.g. `c:\webjea\config.json`).
+* WebJEA is controlled by a JSON configuration file, `webjea.json`, located in your scripts folder (the `ScriptsPath` you chose during [installation](Installation.md), e.g. `c:\webjea\webjea.json`).
 * The file has a JSON schema — keep the `$schema` line from the starter config and editors like VS Code will validate and autocomplete it as you edit.
 * There are a handful of top-level settings, including:
   * `Title` — the page title displayed in WebJEA.
@@ -11,7 +11,7 @@
   * `LogParameters` — whether form inputs are written to the audit log (default `true`; can be overridden per command).
   * `PermittedGroups` — default access groups that have access to all commands.
   * `ShowVerbose` — show verbose output for members of the global permitted groups.
-  * `RenderMode` — default rendering for command output: `Legacy` or `Markdown`.
+  * `RenderMode` — default rendering for command output: `Legacy`, `Markdown` or `Link`.
   * `SendTelemetry` — anonymous usage statistics upload; set `false` to disable.
 * `Commands` — each command exposes one script as a web form:
   * `Id` (required) — unique identifier, used in URLs (`?id=<value>`).
@@ -24,10 +24,10 @@
 
 ## Editing the configuration
 
-Edit `config.json` directly in an editor that understands JSON schemas, such as VS Code. Keep this line at the top of the file:
+Edit `webjea.json` directly in an editor that understands JSON schemas, such as VS Code. Keep this line at the top of the file:
 
 ```json
-"$schema": "https://raw.githubusercontent.com/markdomansky/WebJEA/master/schemas/webjea-config-2026-04.schema.json",
+"$schema": "https://www.schemastore.org/webjea.json",
 ```
 
 The editor then autocompletes property names, shows each setting's description, and flags wrong types and missing required values (`Title`, `Commands`, and each command's `Id`) before WebJEA loads the file. Changes take effect on the next page load.

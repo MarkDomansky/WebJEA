@@ -21,7 +21,7 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0-windowsservercore-ltsc2022
 WORKDIR /app
 COPY --from=build /app/publish .
 
-# C:\webjea\scripts holds config.json and the PowerShell scripts; C:\webjea\logs
+# C:\webjea\scripts holds webjea.json and the PowerShell scripts; C:\webjea\logs
 # receives the NLog output (WEBJEA_LOG_DIR is read by the shipped NLog.config).
 RUN mkdir C:\webjea\scripts C:\webjea\logs
 VOLUME ["C:/webjea/scripts", "C:/webjea/logs"]
@@ -29,7 +29,7 @@ VOLUME ["C:/webjea/scripts", "C:/webjea/logs"]
 ENV ASPNETCORE_URLS=http://+:8080 `
     ASPNETCORE_FORWARDEDHEADERS_ENABLED=true `
     WEBJEA_LOG_DIR=C:/webjea/logs `
-    WebJEA__ConfigFile=C:/webjea/scripts/config.json
+    WebJEA__ConfigFile=C:/webjea/scripts/webjea.json
 
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "WebJEA.dll"]

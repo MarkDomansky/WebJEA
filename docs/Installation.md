@@ -36,7 +36,7 @@ The settings file is consumed by the installer (`Deploy.ps1`). It uses JSON synt
 | `ServicePassword` | Password for `ServiceUserName`. Leave empty for a gMSA. |
 | `HttpPort` / `HttpsPort` | Ports. Set a port number to listen, or `0`/omit to disable that listener. At least one must be enabled. `HttpsPort` requires `CertThumbprint`. When `HttpPort`, `HttpsPort`, and `CertThumbprint` are all set, HTTP is automatically and permanently redirected to HTTPS — there is no separate setting for this. Kestrel binds these ports exclusively, unlike IIS's shared `http.sys` binding — nothing else on the server, including IIS, can also be listening on the same port. |
 | `CertThumbprint` | Thumbprint of a certificate in the `LocalMachine\My` store covering every FQDN above, imported with its private key. `Deploy.ps1` grants `ServiceUserName` read access to that key so the account does not need to be a local administrator; re-run it after a renewal, since a new key file starts out admins-only ([details](System-Requirements.md#private-key-permissions)). Leave the placeholder (or empty) only when `HttpsPort` is `0`. |
-| `ScriptsPath` | Where the WebJEA scripts (and `config.json`) will be placed. If the folder already has any files, the starter-script copy is skipped to avoid overwriting customizations. |
+| `ScriptsPath` | Where the WebJEA scripts (and `webjea.json`) will be placed. If the folder already has any files, the starter-script copy is skipped to avoid overwriting customizations. |
 | `LogPath` / `LogFile` | Folder and file name for the application log. |
 | `LogUsageFile` | Simplified usage log, importable into Excel or other analysis tools. |
 
@@ -65,7 +65,7 @@ Grant the gMSA whatever permissions your scripts will need (start with none and 
 
 ## Next steps
 
-* [Usage](Usage.md) — how `config.json` and commands work
+* [Usage](Usage.md) — how `webjea.json` and commands work
 * [Windows authentication](windows.md) — Kerberos SPNs and AD group authorization
 * [Entra ID authentication](entra.md) — cloud or non-domain deployments
 * [PowerShell 7 compatibility](powershell7.md) — before pointing WebJEA at existing scripts

@@ -35,10 +35,10 @@ If using a compose `.env` file, store the secret securely (not in version contro
    ```bash
    cd docker
    mkdir -p scripts logs
-   # copy your config.json and .ps1 scripts into ./scripts
+   # copy your webjea.json and .ps1 scripts into ./scripts
    ```
 
-   In `scripts/config.json`, set `"basepath": "/webjea/scripts"` and use Entra group object IDs, app role values, or UPNs in `permittedgroups` (see [entra.md](entra.md#authorization-modes)).
+   In `scripts/webjea.json`, set `"BasePath": "/webjea/scripts"` and use Entra group object IDs, app role values, or UPNs in `PermittedGroups` (see [entra.md](entra.md#authorization-modes)).
 
 2. Fill in the `AzureAd__*` values in `docker-compose.yml` (Entra ID is required on Linux; Windows/AD authentication needs a Windows host). Prefer a compose `.env` file or secrets over committing the client secret.
 
@@ -52,7 +52,7 @@ If using a compose `.env` file, store the secret securely (not in version contro
 
 ## Quick start (Windows)
 
-Same layout with `docker-compose.windows.yml`, on a Windows host switched to Windows-container mode. In `scripts\config.json` set `"basepath": "C:\\webjea\\scripts"`.
+Same layout with `docker-compose.windows.yml`, on a Windows host switched to Windows-container mode. In `scripts\webjea.json` set `"BasePath": "C:\\webjea\\scripts"`.
 
 The image defaults to Windows (Negotiate) authentication like the Windows service install ([windows.md](windows.md)), but inside a container that only works with a **gMSA credential spec**:
 
@@ -84,7 +84,7 @@ WebJEA's session state is in-memory per container, so scaling an instance beyond
 
 Anything in `appsettings.json` can be overridden with environment variables using `__` separators. The images preset:
 
-- `WebJEA__ConfigFile` — path to `config.json` inside the scripts volume.
+- `WebJEA__ConfigFile` — path to `webjea.json` inside the scripts volume.
 - `WEBJEA_LOG_DIR` — directory NLog writes `webjea.log` / `webjea-usage.log` to.
 - `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true` — honor `X-Forwarded-Proto`/`-For` from a reverse proxy (Entra sign-in redirects require this).
 - Linux only: `Authentication__Mode=Entra`.

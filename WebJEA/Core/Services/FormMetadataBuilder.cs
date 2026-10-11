@@ -17,7 +17,7 @@ public class FormMetadataBuilder
             Title = title,
             DisplayName = cmd.DisplayName ?? cmd.ID,
             Synopsis = cmd.Synopsis,
-            Description = cmd.Description,
+            Description = scriptCmd?.ParsedDescription,
             HasScript = scriptCmd != null,
             HasOnload = onloadCmd != null,
             ShowVerbose = isGlobalUser,

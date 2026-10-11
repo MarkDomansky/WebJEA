@@ -1,0 +1,18 @@
+﻿{
+    "$schema": "https://www.schemastore.org/webjea.json",
+    "Title": "WebJEA",
+    "DashboardHtml": "<b>WebJEA is now installed!</b>",
+    "BasePath": "c:\\scripts",
+    "LogParameters": true,
+    "HtmlLanguage": "en-US",
+    "PermittedGroups": [".\\Administrators"],
+    "ShowVerbose": true,
+    "Commands": [{
+        "Id": "overview",
+        "DisplayName": "Overview",
+        "Synopsis": "Congratulations, WebJEA is now working!  We've pre-loaded a demo script that will help you verify everything is working.  <br/><i>Tip: You can use the synopsis property of default command to display any text you want.  Including html.</i>",
+        "PermittedGroups": [".\\Administrators"],
+        "Script": "validate.ps1",
+        "OnloadScript": "overview.ps1"
+    }]
+}

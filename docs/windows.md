@@ -31,7 +31,7 @@ setspn -S HTTP/webjea.example.com DOMAIN\gmsaname$
 
 ## Group and user resolution
 
-Authorization via `PermittedGroups` in your `config.json` works exactly as before:
+Authorization via `PermittedGroups` in your `webjea.json` works exactly as before:
 
 - Each entry is resolved to an AD **SID** using `GroupPrincipal` or `UserPrincipal` lookups. Entry formats:
   - `DOMAIN\GroupName` — domain group
