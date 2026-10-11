@@ -37,11 +37,47 @@ public class CommandService
 
         try
         {
+            ValidateCommandIds(_config);
+        }
+        catch (Exception ex)
+        {
+            throw new Exception("Invalid config file", ex);
+        }
+
+        try
+        {
             _auth.InitGroups(_config, grpfinder);
         }
         catch (Exception ex)
         {
             throw new Exception("Could not initialize groups", ex);
+        }
+    }
+
+    /// <summary>
+    /// Command Ids must be present and unique. Authorization and script lookup resolve
+    /// duplicates differently (last match vs first), so a duplicate would let a user
+    /// permitted on one entry run the other entry's script.
+    /// </summary>
+    private static void ValidateCommandIds(IConfigProvider config)
+    {
+        if (config?.Commands == null)
+        {
+            return;
+        }
+
+        var seen = new HashSet<string>();
+        foreach (ConfigCmd cmd in config.Commands)
+        {
+            if (cmd == null || string.IsNullOrEmpty(cmd.ID))
+            {
+                throw new Exception("Every command requires a non-empty Id.");
+            }
+
+            if (!seen.Add(cmd.ID))
+            {
+                throw new Exception("Duplicate command Id '" + cmd.ID + "'. Command Ids must be unique (case-insensitive).");
+            }
         }
     }
 

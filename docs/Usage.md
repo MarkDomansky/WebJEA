@@ -10,8 +10,8 @@
   * `BasePath` — default folder for scripts referenced with relative paths.
   * `LogParameters` — whether form inputs are written to the audit log (default `true`; can be overridden per command).
   * `PermittedGroups` — default access groups that have access to all commands.
-  * `ShowVerbose` — show verbose output for members of the global permitted groups.
-  * `RenderMode` — default rendering for command output: `Legacy`, `Markdown` or `Link`.
+  * `ShowVerbose` — whether members of the global `PermittedGroups` can see verbose output (default `true`). Applies to global users only; other users never see verbose output. There is no per-command override.
+  * `RenderMode` — default rendering for command output: `Legacy` (default), `Markdown` or `Link`; can be overridden per command. `Markdown` and `Link` require v2100 or later.
   * `SendTelemetry` — anonymous usage statistics upload; set `false` to disable.
 * `Commands` — each command exposes one script as a web form:
   * `Id` (required) — unique identifier, used in URLs (`?id=<value>`).

@@ -119,6 +119,9 @@ public static class ExecuteEndpoint
                 verbose = verboseToken.Value<bool>();
             }
 
+            // Verbose output is for global users only, and only when ShowVerbose allows it
+            verbose = verbose && cmdSvc.Config.ShowVerbose && cmdSvc.Auth.IsGlobalUser(uinfo);
+
             ConfigCmd cmd = cmdSvc.GetCommand(uinfo, cmdid);
 
             if (cmd == null)

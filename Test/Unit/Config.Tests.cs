@@ -29,6 +29,13 @@ public class ConfigTests
     }
 
     [Fact]
+    public void NewConfig_Title_DefaultWebJEA()
+    {
+        var config = new Config();
+        Assert.Equal("WebJEA", config.Title);
+    }
+
+    [Fact]
     public void NewConfig_ShowVerbose_DefaultTrue()
     {
         var config = new Config();
