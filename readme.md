@@ -39,7 +39,7 @@ The main goals for WebJEA:
 * WebJEA runs on **ASP.NET Core (.NET 10)** and hosts **PowerShell 7** in-process. Scripts execute under PowerShell 7 — see [docs/powershell7.md](docs/powershell7.md) for the (small) compatibility differences from Windows PowerShell 5.1.
 * Windows Server for the classic domain-joined deployment with Integrated Windows Authentication; a domain-joined server is required for AD group authorization. WebJEA installs as a self-hosted **Windows service** on Kestrel — no IIS role and no .NET runtime prerequisite, since the release is a self-contained package.
 * Alternatively, hosting on Windows without AD is supported using **Entra ID** authentication — see [docs/authentication.md](docs/authentication.md).
-* Docker images for Linux and Windows containers can be built from the included configurations — see [docs/docker.md](docs/docker.md).
+* Docker images for Linux containers can be built from the included configurations — see [docs/docker.md](docs/docker.md).
 * CPU/RAM Requirements will depend significantly on your usage. <br>_Expect roughly the cost of spinning up a PowerShell 7 runspace per execution plus typical ASP.NET Core consumption.  Your usage will vary greatly depending on what your script does._
 
 ### Recommended

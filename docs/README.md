@@ -12,7 +12,7 @@ WebJEA dynamically builds web forms for any PowerShell script — parsing the sc
 ## Deployment and hosting
 
 * [Deployment guide](deployment-migration.md) — the Windows service (`Deploy.ps1`) and migrating from the classic IIS/WebForms releases
-* [Docker](docker.md) — Linux and Windows container images
+* [Docker](docker.md) — Linux container images
 
 ## Authentication
 

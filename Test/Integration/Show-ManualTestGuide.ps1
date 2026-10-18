@@ -10,9 +10,7 @@
                             (verifies the Deploy.ps1 port-conflict guard + coexistence)
       2. ServerDesktop    - Windows Server (Desktop Experience), no IIS
       3. ServerCore       - Windows Server Core (shell only), no IIS
-      4. WindowsContainer - Windows container under Hyper-V isolation on Windows 11
-                            (Docker Desktop, Windows-container mode)
-      5. LinuxContainer   - Linux container on Docker Desktop (WSL2)
+      4. LinuxContainer   - Linux container on Docker Desktop (WSL2)
 
     Each step prints the exact commands to run and a verification checklist.
     Press Enter to advance, Q to quit. Run with -NoPause to print an entire
@@ -45,7 +43,7 @@
 [CmdletBinding()]
 param(
     [Parameter()]
-    [ValidateSet('ServerWithIIS', 'ServerDesktop', 'ServerCore', 'WindowsContainer', 'LinuxContainer', 'All')]
+    [ValidateSet('ServerWithIIS', 'ServerDesktop', 'ServerCore', 'LinuxContainer', 'All')]
     [string[]]$Scenario,
 
     [Parameter()]
@@ -387,9 +385,8 @@ function Step_EntraAppRegistration([string]$RedirectUri)
     @{
         Title  = 'Create the Entra ID app registration'
         Body   = @(
-            'Containers in this scenario use Entra ID authentication (Windows/Negotiate'
-            'auth inside a container needs a gMSA credential spec on a domain-joined'
-            'container HOST - not applicable to a typical Windows 11 / Docker Desktop lab).'
+            'The Linux container uses Entra ID authentication (Windows/Negotiate auth'
+            'needs a Windows host).'
             ''
             'Follow docs/entra-appreg.md:'
             '  1. New app registration in your tenant; record Tenant ID and Client ID.'
@@ -410,7 +407,7 @@ function Step_ContainerContent([string]$BasePath)
     @{
         Title  = 'Prepare the scripts and logs folders'
         Body   = @(
-            'The compose files mount .\scripts and .\logs from the docker\ folder into'
+            'The compose file mounts .\scripts and .\logs from the docker\ folder into'
             'the container. Seed scripts\ with the starter config and scripts, then fix'
             'BasePath and PermittedGroups for the container environment.'
         )
@@ -428,9 +425,8 @@ function Step_ContainerContent([string]$BasePath)
     }
 }
 
-function Step_ContainerVerify([string]$Compose, [string]$OsNote)
+function Step_ContainerVerify([string]$OsNote)
 {
-    $composeArg = if ($Compose) { "-f $Compose " } else { '' }
     @{
         Title  = 'Verify the container'
         Body   = @(
@@ -439,7 +435,7 @@ function Step_ContainerVerify([string]$Compose, [string]$OsNote)
         )
         Code   = @(
             'docker ps                                   # webjea container Up'
-            "docker compose $($composeArg)logs -f webjea    # startup log; Ctrl+C to detach"
+            'docker compose logs -f webjea    # startup log; Ctrl+C to detach'
             'curl.exe -s -o NUL -w "%{http_code}`n" http://localhost:8080/   # 302 to Entra sign-in'
             'curl.exe -s -o NUL -w "%{http_code} -> %{redirect_url}`n" http://localhost:8080/webjea/'
         )
@@ -600,95 +596,6 @@ function Get-Scenarios
         )
     }
 
-    $scenarios['WindowsContainer'] = @{
-        Name    = 'Windows container (Hyper-V isolation) on Windows 11'
-        Summary = 'Dockerfile.windows via Docker Desktop in Windows-container mode.'
-        Steps   = @(
-            @{
-                Title = 'What this scenario tests'
-                Body  = @(
-                    'Builds docker/Dockerfile.windows and runs it with'
-                    'docker-compose.windows.yml under Docker Desktop on Windows 11. On a client'
-                    'OS, Windows containers always run with HYPER-V ISOLATION - which is exactly'
-                    'what this scenario is meant to cover.'
-                )
-            }
-            @{
-                Title  = 'Prepare the Windows 11 host'
-                Body   = @(
-                    'Requires Windows 11 Pro/Enterprise with hardware virtualization enabled in'
-                    'firmware, plus Docker Desktop.'
-                )
-                Code   = @(
-                    '# Elevated PowerShell (reboot when prompted):'
-                    'Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V, Containers -All'
-                    ''
-                    '# Install Docker Desktop (or download from docker.com):'
-                    'winget install --id Docker.DockerDesktop'
-                    ''
-                    '# Switch Docker Desktop to WINDOWS containers (or use the tray icon menu'
-                    '# "Switch to Windows containers..."):'
-                    '& "$env:ProgramFiles\Docker\Docker\DockerCli.exe" -SwitchWindowsEngine'
-                    ''
-                    'docker version -f "{{.Server.Os}}"    # must print: windows'
-                )
-                Verify = @(
-                    'docker version reports Server OS = windows'
-                    'Hyper-V and Containers features are enabled'
-                )
-            }
-            (Step_EntraAppRegistration -RedirectUri 'http://localhost:8080/signin-oidc')
-            (Step_ContainerContent -BasePath 'C:\\webjea\\scripts')
-            @{
-                Title  = 'Configure compose for Entra and start the container'
-                Body   = @(
-                    'The Windows image DEFAULTS to Windows (Negotiate) auth, which needs a gMSA'
-                    'credential spec on a domain-joined host. On a Windows 11 lab box, switch it'
-                    'to Entra: in docker\docker-compose.windows.yml, uncomment the environment'
-                    'block and fill in:'
-                    ''
-                    '  Authentication__Mode: Entra'
-                    '  AzureAd__TenantId:    <tenant-guid>'
-                    '  AzureAd__ClientId:    <client-id>'
-                    '  AzureAd__ClientSecret: <client-secret>'
-                    ''
-                    'The first build pulls the Windows Server Core base image - several GB, so'
-                    'expect the initial build to take a while.'
-                )
-                Code   = @(
-                    'cd <repo-root>\docker'
-                    'docker compose -f docker-compose.windows.yml up -d --build'
-                )
-                Note   = 'gMSA path (only on a DOMAIN-JOINED container host): create a gMSA, install the CredentialSpec module, New-CredentialSpec -AccountName <gmsa>, then uncomment security_opt in the compose file instead of the Entra block. See docs/docker.md.'
-                Verify = @(
-                    'Build succeeds (multi-stage: sdk:10.0 build, aspnet:10.0-windowsservercore-ltsc2022 runtime)'
-                    'docker ps shows the webjea:windows container Up with 8080->8080'
-                )
-            }
-            @{
-                Title  = 'Confirm Hyper-V isolation'
-                Body   = @('On Windows 11 (client OS) the container must be Hyper-V isolated.')
-                Code   = @(
-                    "docker inspect -f '{{.HostConfig.Isolation}}' `$(docker ps -q -f ancestor=webjea:windows)"
-                )
-                Verify = @(
-                    "Isolation prints 'hyperv' (or 'default', which resolves to hyperv on a"
-                    '  client OS - process isolation is server-host only)'
-                )
-            }
-            (Step_ContainerVerify -Compose 'docker-compose.windows.yml' -OsNote 'Scripts execute inside the Windows container: Windows cmdlets work, but the container is not domain-joined unless you configured a credential spec.')
-            @{
-                Title  = 'Cleanup'
-                Body   = @('Stop the stack and (optionally) switch Docker back to Linux containers.')
-                Code   = @(
-                    'docker compose -f docker-compose.windows.yml down'
-                    '& "$env:ProgramFiles\Docker\Docker\DockerCli.exe" -SwitchLinuxEngine'
-                )
-                Verify = @('docker ps no longer lists the webjea container')
-            }
-        )
-    }
-
     $scenarios['LinuxContainer'] = @{
         Name    = 'Linux container on Docker Desktop'
         Summary = 'Dockerfile (Linux) + docker-compose.yml with Entra ID auth on WSL2.'
@@ -731,7 +638,7 @@ function Get-Scenarios
                     'docker ps shows webjea:latest Up with 8080->8080'
                 )
             }
-            (Step_ContainerVerify -Compose '' -OsNote 'Note: the starter overview.ps1 calls Get-Process svchost, which does not exist on Linux - it will surface as a script ERROR in the output. That is fine here: it doubles as the error-rendering check (page still returns HTTP 200).')
+            (Step_ContainerVerify -OsNote 'Note: the starter overview.ps1 calls Get-Process svchost, which does not exist on Linux - it will surface as a script ERROR in the output. That is fine here: it doubles as the error-rendering check (page still returns HTTP 200).')
             @{
                 Title  = 'Cleanup'
                 Body   = @('Stop and remove the stack.')
