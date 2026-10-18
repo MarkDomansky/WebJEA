@@ -13,7 +13,7 @@ WebJEA ships Docker configurations for both Linux and Windows containers under [
 
 ## Entra ID app registration setup
 
-Both Linux and Windows containers using Entra ID require an app registration in your Entra ID tenant. Follow the step-by-step walkthrough in [entra.md — App registration setup](entra.md#app-registration-setup) (create the registration, enable ID tokens, add the groups claim, optionally create a secret and grant Graph permission), then map the values to environment variables.
+Both Linux and Windows containers using Entra ID require an app registration in your Entra ID tenant. Follow the step-by-step walkthrough in [Entra App Registration](entra-appreg.md) (create the registration, enable ID tokens, add the groups claim, create a client secret and grant Graph permission), then map the values you collected to environment variables.
 
 In your `docker-compose.yml` or `.env` file, set:
 
@@ -21,8 +21,7 @@ In your `docker-compose.yml` or `.env` file, set:
 AzureAd__Instance=https://login.microsoftonline.com/
 AzureAd__TenantId=<Directory (tenant) ID from step 1>
 AzureAd__ClientId=<Application (client) ID from step 1>
-AzureAd__ClientSecret=<Value from step 3>
-AzureAd__CallbackPath=/signin-oidc
+AzureAd__ClientSecret=<Value from step 4>
 Authentication__Mode=Entra
 ```
 
@@ -38,7 +37,7 @@ If using a compose `.env` file, store the secret securely (not in version contro
    # copy your webjea.json and .ps1 scripts into ./scripts
    ```
 
-   In `scripts/webjea.json`, set `"BasePath": "/webjea/scripts"` and use Entra group object IDs, app role values, or UPNs in `PermittedGroups` (see [entra.md](entra.md#authorization-modes)).
+   In `scripts/webjea.json`, set `"BasePath": "/webjea/scripts"` and use Entra group object IDs, app role values, or UPNs in `PermittedGroups` (see [entra.md](entra.md#authorizing-users)).
 
 2. Fill in the `AzureAd__*` values in `docker-compose.yml` (Entra ID is required on Linux; Windows/AD authentication needs a Windows host). Prefer a compose `.env` file or secrets over committing the client secret.
 
