@@ -5,7 +5,7 @@
         "_comment": "Hyper-V host and VM configuration",
         "DomainControllerVMName": "DC01",
         "WebServerVMName": "WEB01",
-        "SnapshotName": "Clean-Baseline",
+        "SnapshotName": "lab-baseline",
         "HyperVHost": "localhost",
         "_comment2": "Timeout in seconds for VM operations",
         "VMOperationTimeout": 300,
@@ -17,15 +17,10 @@
         "_comment": "Credentials for PowerShell Direct and web authentication",
         "Domain": "domain1",
         "Username": "deployadmin",
-        "_comment2": "Password should be stored securely - consider using SecretManagement module",
+        "_comment2": "Set the password with .\\Set-TestCredential.ps1 (SecretManagement secret named below; installs and registers a vault if needed)",
         "PasswordSecretName": "WebJEA-TestAdmin",
-        "_comment4": "Store passwords with PowerShell SecretManagement instead of plaintext.",
-        "_comment5": "Install SecretManagement modules: Install-Module Microsoft.PowerShell.SecretManagement, Microsoft.PowerShell.SecretStore -Force",
-        "_comment6": "Register a vault (example using SecretStore): Register-SecretVault -Name SecretStore -ModuleName Microsoft.PowerShell.SecretStore -DefaultVault",
-        "_comment7": "Add secret interactively: Read-Host -AsSecureString | Set-Secret -Name 'WebJEA-TestAdmin'",
-        "_comment8": "Or store credentials: $cred = Get-Credential; Set-Secret -Name 'WebJEA-TestAdmin' -Secret $cred",
-        "_comment3": "Alternative: path to XML credential file exported with Export-Clixml",
-        "CredentialFilePath": ""
+        "_comment3": "Alternative: .\\Set-TestCredential.ps1 -UseFile exports to this file instead. If the file exists, it is used before the secret.",
+        "CredentialFilePath": ".\\cred.clixml"
     },
 
     "GitHub": {
@@ -41,9 +36,9 @@
     "Deployment": {
         "_comment": "Paths on the target VM for deployment",
         "ExtractPath": "C:\\Deploy",
-        "SettingsFileName": "settings.jsonc",
-        "_comment2": "Path on the VM where settings.jsonc should be copied from (local to script runner)",
-        "LocalSettingsPath": ".\\settings.jsonc"
+        "SettingsFileName": "settings.json",
+        "_comment2": "Path on the VM where settings.json should be copied from (local to script runner)",
+        "LocalSettingsPath": ".\\settings.json"
     },
 
     "WebServer": {

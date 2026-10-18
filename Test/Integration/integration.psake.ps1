@@ -3,6 +3,17 @@
 # Each wrapper passes properties and calls a specific top-level task.
 
 Properties {
+    # psake only applies -properties values to variables that already exist, so every
+    # key the wrappers pass must be declared here; otherwise it only arrives when the
+    # caller happens to have a same-named variable in scope.
+    $configPath = $null
+    $helpersPath = $null
+    $useGitHubBuild = $false
+    $quickBuild = $false
+    $auth = $null
+    $tags = $null
+    $excludeTags = $null
+    $outputPath = $null
     $dcStartupDelay = 60
     $timeout = 900
     $doNotRunDeploy = $false
@@ -27,6 +38,11 @@ Task Init {
     $script:quickBuild = $QuickBuild
     $script:doNotRunDeploy = $DoNotRunDeploy
     $script:resetVM = $ResetVM
+    $script:auth = $Auth
+    $script:tags = $Tags
+    $script:excludeTags = $ExcludeTags
+    $script:outputPath = $OutputPath
+    Assert (-not $script:auth -or $script:auth -in @('AD', 'Entra', 'Dev')) "Auth '$script:auth' is not valid. Use 'AD', 'Entra', or 'Dev'."
     $script:deployEdition = if ($DeployEdition) { $DeployEdition } else { 'WindowsPowerShell' }
     Assert ($script:deployEdition -in @('WindowsPowerShell', 'PowerShell7')) "DeployEdition '$script:deployEdition' is not valid. Use 'WindowsPowerShell' or 'PowerShell7'."
     Assert ($script:configPath -and (Test-Path $script:configPath)) "ConfigPath '$script:configPath' not found."
@@ -50,6 +66,7 @@ Task Init {
     Write-Log "  Do Not Run Deploy:    $script:doNotRunDeploy"
     Write-Log "  Deploy Edition:       $script:deployEdition"
     Write-Log "  Reset VM:             $script:resetVM"
+    Write-Log "  Auth:                 $(if ($script:auth) { $script:auth } else { '(unchanged)' })"
     Write-Log "  BuildOutputDir:       $script:buildOutputDir"
     Write-Log "  BuildInfoFile:        $script:buildInfoFile"
     Write-Log "  Tags:                 $(if ($script:tags.Count -gt 0) { ($script:tags -join ', ') } else { '(none)' })"
@@ -446,6 +463,123 @@ Task RevertVMs -Depends RevertSnapshot_Web {
 # ---------------------------------------------------------------------------
 #  Integration test tasks
 # ---------------------------------------------------------------------------
+
+Task ConfigureAuth -Depends GetCredential -PreCondition { $script:auth } {
+    # Merges appsettings.Production.json (next to config.json) into the deployed site's
+    # appsettings.Production.json rather than replacing it: Deploy.ps1 already wrote
+    # ConfigFile, ports, and the cert thumbprint there.
+    $overlayPath = Join-Path (Split-Path $script:configPath) 'appsettings.Production.json'
+    Assert (Test-Path $overlayPath) "Auth settings file not found: $overlayPath. Copy appsettings.Production.template.json to appsettings.Production.json and fill it in."
+    $overlay = Get-Content -Path $overlayPath -Raw | ConvertFrom-Json
+
+    # -Auth picks the mode; everything else comes from the file
+    $overlay.Authentication.Mode = if ($script:auth -eq 'Entra') { 'Entra' } else { 'Windows' }
+    $overlay.WebJEA.DevAutoLogin = ($script:auth -eq 'Dev')
+    if ($script:auth -eq 'Entra')
+    {
+        Assert ($overlay.AzureAd.TenantId -and $overlay.AzureAd.ClientId) "AzureAd.TenantId and AzureAd.ClientId must be set in $overlayPath for -Auth Entra."
+    }
+
+    # ServiceName comes from the deploy settings file when it is readable; WebJEA otherwise
+    $serviceName = $null
+    $settingsPath = $script:config.Deployment.LocalSettingsPath
+    if ($settingsPath -and -not [System.IO.Path]::IsPathRooted($settingsPath))
+    {
+        $settingsPath = Join-Path (Split-Path $script:configPath) $settingsPath
+    }
+    if ($settingsPath -and (Test-Path $settingsPath))
+    {
+        try { $serviceName = (Get-Content -Path $settingsPath -Raw | ConvertFrom-Json).ServiceName } catch { }
+    }
+    if (-not $serviceName) { $serviceName = 'WebJEA' }
+
+    Write-Log "Configuring '$script:auth' authentication on VM '$script:webVMName' (service '$serviceName')..."
+    $session = New-PSSession -VMName $script:webVMName -Credential $script:credential -ErrorAction Stop
+    try
+    {
+        $result = Invoke-Command -Session $session -ScriptBlock {
+            param($ServiceName, $OverlayJson, $Auth)
+            $ErrorActionPreference = 'Stop'
+
+            function Merge-Settings($Target, $Source)
+            {
+                foreach ($prop in $Source.PSObject.Properties)
+                {
+                    if ($prop.Name.StartsWith('_')) { continue }
+                    $existing = $Target.PSObject.Properties[$prop.Name]
+                    if ($prop.Value -is [pscustomobject])
+                    {
+                        if (-not ($existing -and $existing.Value -is [pscustomobject]))
+                        {
+                            $Target | Add-Member -NotePropertyName $prop.Name -NotePropertyValue ([pscustomobject]@{}) -Force
+                        }
+                        Merge-Settings $Target.($prop.Name) $prop.Value
+                    }
+                    else
+                    {
+                        $Target | Add-Member -NotePropertyName $prop.Name -NotePropertyValue $prop.Value -Force
+                    }
+                }
+            }
+
+            # The site folder is wherever the service's WebJEA.exe lives
+            $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='$ServiceName'"
+            if (-not $service) { throw "Service '$ServiceName' not found. Deploy WebJEA first (TestDeploy.ps1)." }
+            if ($service.PathName -notmatch '^"([^"]+)"|^(\S+)') { throw "Cannot parse service path: $($service.PathName)" }
+            $sitePath = Split-Path -Parent $(if ($Matches[1]) { $Matches[1] } else { $Matches[2] })
+
+            $prodPath = Join-Path $sitePath 'appsettings.Production.json'
+            $settings = if (Test-Path $prodPath) { Get-Content -Path $prodPath -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }
+            Merge-Settings $settings ($OverlayJson | ConvertFrom-Json)
+            $merged = $settings | ConvertTo-Json -Depth 10
+            Set-Content -Path $prodPath -Value $merged -Encoding UTF8
+
+            # DevAutoLogin is inert outside the Development environment, and Development
+            # loads appsettings.Development.json instead of the Production file, so that
+            # file gets the same merged settings. Other modes clear the override.
+            $regPath = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
+            $serviceEnv = @((Get-ItemProperty -Path $regPath -Name Environment -ErrorAction SilentlyContinue).Environment |
+                Where-Object { $_ -and $_ -notlike 'ASPNETCORE_ENVIRONMENT=*' })
+            if ($Auth -eq 'Dev')
+            {
+                Set-Content -Path (Join-Path $sitePath 'appsettings.Development.json') -Value $merged -Encoding UTF8
+                $serviceEnv += 'ASPNETCORE_ENVIRONMENT=Development'
+            }
+            if ($serviceEnv.Count -gt 0)
+            {
+                New-ItemProperty -Path $regPath -Name Environment -PropertyType MultiString -Value ([string[]]$serviceEnv) -Force | Out-Null
+            }
+            else
+            {
+                Remove-ItemProperty -Path $regPath -Name Environment -ErrorAction SilentlyContinue
+            }
+
+            Restart-Service -Name $ServiceName -Force
+
+            # Wait for Kestrel to bind; a bad auth config stops the service at startup
+            $port = [int]$settings.WebJEA.HttpsPort
+            if (-not $port) { $port = [int]$settings.WebJEA.HttpPort }
+            $deadline = (Get-Date).AddSeconds(60)
+            do
+            {
+                Start-Sleep -Seconds 2
+                $listening = $port -and (Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue)
+                $status = (Get-Service -Name $ServiceName).Status
+            } until ($listening -or $status -ne 'Running' -or (Get-Date) -gt $deadline)
+            if ($status -ne 'Running') { throw "Service '$ServiceName' stopped after restart ($status). Check the WebJEA log for the startup error." }
+            if (-not $listening) { throw "Service '$ServiceName' did not listen on port $port within 60 seconds." }
+
+            return @{ SitePath = $sitePath; Port = $port }
+        } -ArgumentList $serviceName, ($overlay | ConvertTo-Json -Depth 10), $script:auth
+
+        Write-Log "  Site path: $($result.SitePath)"
+        Write-Log "'$script:auth' authentication configured; listening on port $($result.Port)" -Level Success
+    }
+    finally
+    {
+        Remove-PSSession -Session $session -ErrorAction SilentlyContinue
+    }
+}
 
 Task ConfigureTestOutput -Depends Init {
     if (-not $script:outputPath)
