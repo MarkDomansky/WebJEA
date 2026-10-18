@@ -198,6 +198,91 @@ public class EntraGroupResolverTests
     {
         Assert.Equal("my admins", BuildResolver(resolveNames: true).GetSID("My Admins"));
     }
+
+    private class CountingGraphGroupLoader : GraphGroupLoader
+    {
+        public List<string> Lookups { get; } = new List<string>();
+
+        public CountingGraphGroupLoader() : base(null) { }
+
+        public override string FindGroupIdByDisplayName(string displayName)
+        {
+            Lookups.Add(displayName);
+            return displayName == "My Admins" ? "DDDDDDDD-1111-2222-3333-444444444444" : "";
+        }
+    }
+
+    private static EntraGroupResolver BuildResolverWithLoader(GraphGroupLoader loader, string appRolePrefix = null)
+    {
+        var settings = new Dictionary<string, string>(); // ResolveGroupNamesViaGraph unset: defaults to true
+        if (appRolePrefix != null) settings["Authentication:Entra:AppRolePrefix"] = appRolePrefix;
+        var config = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
+        var services = new ServiceCollection().AddSingleton(loader).BuildServiceProvider();
+        return new EntraGroupResolver(config, services);
+    }
+
+    [Fact]
+    public void DisplayName_ResolvesViaGraph_ByDefault()
+    {
+        var loader = new CountingGraphGroupLoader();
+
+        Assert.Equal("dddddddd-1111-2222-3333-444444444444", BuildResolverWithLoader(loader).GetSID("My Admins"));
+        Assert.Equal(new[] { "My Admins" }, loader.Lookups);
+    }
+
+    [Theory]
+    [InlineData("alice@contoso.com")]
+    [InlineData("Alice.Smith@sub.contoso.co.uk")]
+    public void Upn_SkipsGraphLookup(string upn)
+    {
+        var loader = new CountingGraphGroupLoader();
+
+        Assert.Equal(upn.ToLowerInvariant(), BuildResolverWithLoader(loader).GetSID(upn));
+        Assert.Empty(loader.Lookups);
+    }
+
+    [Theory]
+    [InlineData("WebJEA.HR")]
+    [InlineData("webjea.admin")]
+    public void AppRolePrefix_SkipsGraphLookup(string role)
+    {
+        var loader = new CountingGraphGroupLoader();
+
+        Assert.Equal(role.ToLowerInvariant(), BuildResolverWithLoader(loader, "WebJEA.").GetSID(role));
+        Assert.Empty(loader.Lookups);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void NoAppRolePrefix_RoleValuesAreStillLookedUp(string prefix)
+    {
+        var loader = new CountingGraphGroupLoader();
+
+        BuildResolverWithLoader(loader, prefix).GetSID("WebJEA.HR");
+        Assert.Equal(new[] { "WebJEA.HR" }, loader.Lookups);
+    }
+
+    [Fact]
+    public void AppRolePrefix_DoesNotAffectOtherNames()
+    {
+        var loader = new CountingGraphGroupLoader();
+
+        Assert.Equal("dddddddd-1111-2222-3333-444444444444",
+            BuildResolverWithLoader(loader, "WebJEA.").GetSID("My Admins"));
+        Assert.Equal(new[] { "My Admins" }, loader.Lookups);
+    }
+
+    [Theory]
+    [InlineData("Help Desk @ HQ")]
+    [InlineData("admins@contoso")]
+    public void AtSignButNotUpn_IsStillLookedUp(string name)
+    {
+        var loader = new CountingGraphGroupLoader();
+
+        BuildResolverWithLoader(loader).GetSID(name);
+        Assert.Equal(new[] { name }, loader.Lookups);
+    }
 }
 
 public class ClaimsUserContextTests
