@@ -5,7 +5,7 @@ The system requirements are pretty flexible and will depend on usage.
 ## Operating system
 
 * **Windows Server** (2019 or later recommended) for the classic domain-joined deployment with Windows (Kerberos/NTLM) authentication. WebJEA installs as a self-hosted **Windows service** running on Kestrel — no IIS role is required or used, and the release is a self-contained .NET package, so there is no .NET runtime prerequisite to install.
-* **Docker** images for Linux and Windows containers can be built from the included configurations — see [docker.md](docker.md).
+* **Docker** images for Linux containers can be built from the included configurations — see [docker.md](docker.md).
 
 ## PowerShell
 

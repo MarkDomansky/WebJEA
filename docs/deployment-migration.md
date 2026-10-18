@@ -1,6 +1,6 @@
 # Deployment (ASP.NET Core migration)
 
-WebJEA is an ASP.NET Core application on .NET 10. The release zip's `site/` folder is a `dotnet publish` output rather than a WebForms site, which changes how it is hosted. Docker hosting (Linux and Windows containers) is covered separately in [docker.md](docker.md).
+WebJEA is an ASP.NET Core application on .NET 10. The release zip's `site/` folder is a `dotnet publish` output rather than a WebForms site, which changes how it is hosted. Docker hosting (Linux containers) is covered separately in [docker.md](docker.md).
 
 ## Windows: Deploy.ps1 (Windows service)
 

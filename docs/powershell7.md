@@ -6,7 +6,7 @@ WebJEA now hosts **PowerShell 7.6** in-process (via `Microsoft.PowerShell.SDK`) 
 
 - `$PSVersionTable.PSEdition` is `Core` and `PSVersion` is 7.x. Scripts that branch on edition/version behave accordingly.
 - **`Get-WmiObject` and the `*-Wmi*` cmdlets are gone.** Use the CIM cmdlets (`Get-CimInstance`, `Invoke-CimMethod`, ...).
-- **`Add-PSSnapin` is gone.** Snap-in-based tooling (some legacy Exchange/third-party snap-ins) will need to move to modules or remoting.  If running on Windows Server (not in a container), you can leverage PowerShell 5 interop.
+- **`Add-PSSnapin` is gone.** Snap-in-based tooling (some legacy Exchange/third-party snap-ins) will need to move to modules or remoting.  When WebJEA runs directly on Windows Server as a Windows service (rather than in a Linux container), you can leverage PowerShell 5 interop.
 - **Windows-PowerShell-only modules** may not load natively. PowerShell 7 can proxy many of them via the compatibility layer (`Import-Module <name> -UseWindowsPowerShell`), but proxied objects are deserialized — method calls on returned objects will not work. The ActiveDirectory RSAT module, Exchange Online v3, Az, and most current first-party modules support PowerShell 7 natively.
 - **Default file encoding is UTF-8 (no BOM)** for `Out-File`/redirection instead of UTF-16/ANSI. Pass `-Encoding` explicitly where downstream consumers care.
 - Console-less `Out-String` formatting width can differ from PS 5.1; explicit `Format-Table -AutoSize | Out-String -Width 200` gives deterministic output.
