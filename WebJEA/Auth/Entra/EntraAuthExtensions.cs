@@ -8,9 +8,9 @@ public static class EntraAuthExtensions
     /// <summary>
     /// Entra ID (Azure AD) authentication: OIDC web-app sign-in with cookies.
     /// Authorization uses the "groups" claim (group object IDs) and the "roles" claim
-    /// (app role values); enable Authentication:Entra:EnableGraph for the >200-group
-    /// overage fallback and Authentication:Entra:ResolveGroupNamesViaGraph to allow
-    /// display names in PermittedGroups.
+    /// (app role values). Authentication:Entra:EnableGraph (on by default) adds the
+    /// >200-group overage fallback and, with Authentication:Entra:ResolveGroupNamesViaGraph,
+    /// display names in PermittedGroups; it needs AzureAd:ClientSecret.
     /// </summary>
     public static WebApplicationBuilder AddWebJeaEntraAuth(this WebApplicationBuilder builder)
     {
@@ -18,7 +18,7 @@ public static class EntraAuthExtensions
             .AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
             .AddMicrosoftIdentityWebApp(builder.Configuration.GetSection("AzureAd"));
 
-        bool enableGraph = builder.Configuration.GetValue<bool>("Authentication:Entra:EnableGraph");
+        bool enableGraph = builder.Configuration.GetValue("Authentication:Entra:EnableGraph", true);
         if (enableGraph)
         {
             authBuilder

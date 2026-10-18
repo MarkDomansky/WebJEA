@@ -50,7 +50,7 @@ public class GraphGroupLoader
         return ids;
     }
 
-    public string FindGroupIdByDisplayName(string displayName)
+    public virtual string FindGroupIdByDisplayName(string displayName)
     {
         try
         {
