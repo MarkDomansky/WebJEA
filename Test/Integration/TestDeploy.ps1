@@ -44,6 +44,12 @@
     When specified, the VM is stopped, reverted to the snapshot defined in config.json (HyperV.SnapshotName),
     and started fresh before the deployment begins.
 
+.PARAMETER Auth
+    Configure the deployed site's authentication after deploying: 'AD' (Windows/Kerberos),
+    'Entra' (OIDC), or 'Dev' (DevAutoLogin). Merges appsettings.Production.json (next to
+    config.json; copy it from appsettings.Production.template.json) into the site's
+    settings and restarts the service. Cannot be combined with -DoNotRunDeploy.
+
 .EXAMPLE
     .\Deploy-WebJEA.ps1 -DoNotRunDeploy
 
@@ -56,6 +62,9 @@
 .EXAMPLE
     # Cover the PowerShell 7 path (pwsh.exe must be installed on the VM)
     .\TestDeploy.ps1 -ResetVM -DeployEdition PowerShell7
+
+.EXAMPLE
+    .\TestDeploy.ps1 -ResetVM -Auth Entra
 
 .NOTES
     Requires Hyper-V PowerShell module and psake module.
@@ -85,10 +94,18 @@ param(
     [string]$DeployEdition = 'WindowsPowerShell',
 
     [Parameter()]
-    [switch]$ResetVM
+    [switch]$ResetVM,
+
+    [Parameter()]
+    [ValidateSet('AD', 'Entra', 'Dev')]
+    [string]$Auth
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($Auth -and $DoNotRunDeploy) {
+    throw '-Auth requires a deployed site and cannot be combined with -DoNotRunDeploy.'
+}
 
 if (-not (Get-Module -ListAvailable -Name psake)) {
     Write-Host 'psake module not found. Installing from PSGallery...' -ForegroundColor Yellow
@@ -96,7 +113,8 @@ if (-not (Get-Module -ListAvailable -Name psake)) {
 }
 Import-Module psake -ErrorAction Stop
 
-$taskList = if ($ResetVM) { @('RevertVMs', 'Deploy') } else { @('Deploy') }
+$taskList = @(if ($ResetVM) { 'RevertVMs', 'Deploy' } else { 'Deploy' })
+if ($Auth) { $taskList += 'ConfigureAuth' }
 
 $psakeParams = @{
     buildFile  = "$PSScriptRoot\integration.psake.ps1"
@@ -109,6 +127,7 @@ $psakeParams = @{
         doNotRunDeploy = [bool]$DoNotRunDeploy
         deployEdition  = $DeployEdition
         resetVM        = [bool]$ResetVM
+        auth           = $Auth
     }
     nologo     = $true
 }

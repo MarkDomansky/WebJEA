@@ -348,39 +348,30 @@ begin
         #add site contents
         Step_CopySiteContent -Source "$($settings.SourcePath)\site" -Destination $settings.SitePath -ServiceName $settings.ServiceName -Label 'Site contents'
 
-        #Copy the scripts to the server
-        if ((Test-Path -Path $settings.ScriptsPath -PathType Container) -and
-            (Get-ChildItem -Path $settings.ScriptsPath -Recurse | Measure-Object).Count -gt 1)
-        {
-            @{
-                Description = 'Starter scripts copied (skipped, files already exist)'
-                TestScript  = { $true }
-                SetScript   = { }
-            }
-        }
-        else
-        {
-            #add starter scripts. Only ever reached when ScriptsPath is absent or
-            #effectively empty (the branch above), so this is a first-install seed: a plain
-            #recursive copy, no checksum comparison to make.
-            $scriptSource = $settings.SourcePath + '\Scripts'
-            $scriptDest = $settings.ScriptsPath
-            @{
-                Description = 'Starter scripts copied'
-                TestScript  = {
-                    (Test-Path -Path $scriptDest -PathType Container) -and
-                    (Get-ChildItem -Path $scriptDest -Recurse -File -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0
-                }.GetNewClosure()
-                SetScript   = {
-                    if (-not (Test-Path $scriptDest)) { New-Item -Path $scriptDest -ItemType Directory -Force | Out-Null }
-                    $params = @($scriptSource, $scriptDest, '/E', '/NJH', '/NJS', '/NFL', '/NDL')
-                    Write-Verbose "robocopy.exe $($params -join ' ')"
-                    & robocopy.exe $params
-                    #robocopy exit codes below 8 are success (0 = nothing to copy, 1 = files
-                    #copied, 2 = extra files present, ...); 8 and above are real failures.
-                    if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit code $LASTEXITCODE while copying starter scripts" }
-                }.GetNewClosure()
-            }
+        #Seed the starter scripts. Keyed on the config file, not on "ScriptsPath has files":
+        #SitePath and LogPath may live inside ScriptsPath (C:\webjea\site), so the site copy
+        #above - or a log from an earlier run - would make an empty install look seeded and
+        #leave no webjea.json for the WebJEA section to edit. config.json counts too: the
+        #rename step below carries it over.
+        #/XC /XN /XO copy only files that are missing, so a folder the admin has already
+        #started (their own overview.ps1, say) is filled in, never overwritten.
+        $scriptSource = $settings.SourcePath + '\Scripts'
+        $scriptDest = $settings.ScriptsPath
+        @{
+            Description = 'Starter scripts copied'
+            TestScript  = {
+                (Test-Path -Path "$scriptDest\webjea.json" -PathType Leaf) -or
+                (Test-Path -Path "$scriptDest\config.json" -PathType Leaf)
+            }.GetNewClosure()
+            SetScript   = {
+                if (-not (Test-Path $scriptDest)) { New-Item -Path $scriptDest -ItemType Directory -Force | Out-Null }
+                $params = @($scriptSource, $scriptDest, '/E', '/XC', '/XN', '/XO', '/NJH', '/NJS', '/NFL', '/NDL')
+                Write-Verbose "robocopy.exe $($params -join ' ')"
+                & robocopy.exe $params
+                #robocopy exit codes below 8 are success (0 = nothing to copy, 1 = files
+                #copied, 2 = extra files present, ...); 8 and above are real failures.
+                if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit code $LASTEXITCODE while copying starter scripts" }
+            }.GetNewClosure()
         }
 
         #The config file was named config.json before it became webjea.json. An upgrade

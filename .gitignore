@@ -293,9 +293,11 @@ __pycache__/
 #This stores a credential object that is used for testing. It contains a password, so we don't want it in source control.
 Test/Integration/cred.clixml
 #This is dev computer specific settings for the integration tests.  Use the template file and adjust to your needs.
-Test/Integration/settings.jsonc
+Test/Integration/settings.json
 #This is dev computer specific settings for the integration tests.  Use the template file and adjust to your needs.
 Test/Integration/config.json
+#Auth settings (Entra tenant/client/secret) pushed to the test VM by TestDeploy.ps1 / Invoke-IntegrationTests.ps1 -Auth.  Use the template file.
+Test/Integration/appsettings.Production.json
 #AWS secrets - compiled into DLL. Copy AwsSecrets.template.vb to AwsSecrets.vb and fill in your values.
 WebJEA/AwsSecrets.vb
 Copilot-Processing.md

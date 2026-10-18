@@ -19,6 +19,14 @@
 .PARAMETER OutputPath
     Path for test result output files.
 
+.PARAMETER Auth
+    Reconfigure the deployed site's authentication before testing: 'AD' (Windows/Kerberos),
+    'Entra' (OIDC), or 'Dev' (DevAutoLogin). Merges appsettings.Production.json (next to
+    config.json; copy it from appsettings.Production.template.json) into the site's
+    appsettings.Production.json on the web VM and restarts the service. 'Dev' also sets
+    ASPNETCORE_ENVIRONMENT=Development on the service; 'AD' and 'Entra' clear it.
+    Omit to test the site as currently configured.
+
 .EXAMPLE
     .\Invoke-IntegrationTests.ps1
 
@@ -27,6 +35,9 @@
 
 .EXAMPLE
     .\Invoke-IntegrationTests.ps1 -ConfigPath .\custom-config.json -OutputPath .\Results
+
+.EXAMPLE
+    .\Invoke-IntegrationTests.ps1 -Auth Entra
 
 .NOTES
     Requires Pester v5.0 or later and psake module.
@@ -48,7 +59,11 @@ param(
     [string[]]$ExcludeTags,
 
     [Parameter()]
-    [string]$OutputPath
+    [string]$OutputPath,
+
+    [Parameter()]
+    [ValidateSet('AD', 'Entra', 'Dev')]
+    [string]$Auth
 )
 
 $ErrorActionPreference = 'Stop'
@@ -67,10 +82,13 @@ $psakeProperties = @{
 if ($Tags)        { $psakeProperties.tags        = $Tags }
 if ($ExcludeTags) { $psakeProperties.excludeTags  = $ExcludeTags }
 if ($OutputPath)  { $psakeProperties.outputPath   = $OutputPath }
+if ($Auth)        { $psakeProperties.auth         = $Auth }
+
+$taskList = if ($Auth) { @('ConfigureAuth', 'IntegrationTest') } else { @('IntegrationTest') }
 
 $psakeParams = @{
     buildFile  = Join-Path $PSScriptRoot 'integration.psake.ps1'
-    taskList   = @('IntegrationTest')
+    taskList   = $taskList
     properties = $psakeProperties
     nologo     = $true
 }
