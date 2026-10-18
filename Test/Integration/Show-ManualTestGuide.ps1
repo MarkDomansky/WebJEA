@@ -391,11 +391,12 @@ function Step_EntraAppRegistration([string]$RedirectUri)
             'auth inside a container needs a gMSA credential spec on a domain-joined'
             'container HOST - not applicable to a typical Windows 11 / Docker Desktop lab).'
             ''
-            'Follow docs/entra.md "App registration setup":'
+            'Follow docs/entra-appreg.md:'
             '  1. New app registration in your tenant; record Tenant ID and Client ID.'
             "  2. Add a Web redirect URI: $RedirectUri"
-            '  3. Enable ID tokens; add the groups claim (or app roles).'
+            '  3. Enable ID tokens; add the groups claim.'
             '  4. Create a client secret; record its value.'
+            '  5. Grant GroupMember.Read.All (delegated) with admin consent.'
         )
         Verify = @(
             'Tenant ID, Client ID, and client secret recorded'
@@ -418,7 +419,7 @@ function Step_ContainerContent([string]$BasePath)
             'mkdir scripts, logs'
             'Copy-Item ..\ReleaseFiles\scripts\* .\scripts\'
         )
-        Note   = ('Edit scripts\webjea.json: set "BasePath": "{0}" and change PermittedGroups from ".\\Administrators" to Entra values - a group object ID, app role value, or user UPN, or "*" for any signed-in user (lab only). See docs/entra.md Authorization modes.' -f $BasePath)
+        Note   = ('Edit scripts\webjea.json: set "BasePath": "{0}" and change PermittedGroups from ".\\Administrators" to Entra values - a group object ID, app role value, or user UPN, or "*" for any signed-in user (lab only). See docs/entra.md "Authorizing users".' -f $BasePath)
         Verify = @(
             'docker\scripts contains webjea.json, overview.ps1, validate.ps1'
             "webjea.json BasePath is $BasePath"
