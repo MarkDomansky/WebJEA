@@ -125,7 +125,7 @@ The `AzureAd` section name comes from Microsoft.Identity.Web, the library WebJEA
 
 When a user belongs to more than ~200 groups, counting nested groups, Entra omits the `groups` claim entirely and sends an overage marker instead. With `EnableGraph: true`, WebJEA detects this and calls `GET /me/transitiveMemberOf` at sign-in to fetch the user's full list of group object IDs. That adds some latency at sign-in (typically under 500 ms).
 
-Without Graph, WebJEA can't see any of that user's groups, even ones they're a direct member of, and logs a warning. UPN, app role and `*` entries still work.
+Without Graph, WebJEA can't see any of that user's groups, even ones they're a direct member of, and logs a warning. UPN, app role and `*` entries still work. Turning Graph off can also lower the limit to as few as 5 groups ([Troubleshooting](#troubleshooting)), so keep the default `EnableGraph: true` and complete the [app registration](entra-appreg.md).
 
 ## Switching from Windows mode
 
@@ -147,7 +147,7 @@ Entra errors are written to the WebJEA log. Most authorization problems show up 
 | `AADSTS700054: response_type 'id_token' is not enabled` | ID tokens not enabled on the app registration. | [Step 2](entra-appreg.md#step-2-enable-id-tokens). |
 | `AADSTS50011: The redirect URI ... does not match` | The URL users browse to (or the proxy's external URL) isn't registered. | Add `https://<host>/signin-oidc` under **Authentication** ([Step 1](entra-appreg.md#step-1-create-the-app-registration)). |
 | `AADSTS7000215: Invalid client secret` | Wrong value copied (Secret ID instead of Value) or the secret expired. | Create a new secret and copy the **Value** column ([Step 4](entra-appreg.md#step-4-create-a-client-secret)). |
-| `EntraUserContext: group overage detected ... EnableGraph is false` | The user is in more than ~200 groups, so the token has no `groups` claim, and Graph is off. | Set `EnableGraph: true` ([Group overage](#group-overage-users-in-more-than-200-groups)). |
+| `EntraUserContext: group overage detected ... EnableGraph is false` | Graph is turned off, so the token can carry only a limited number of groups. A user in more than ~200 groups gets no `groups` claim. With Graph off, sign-in can also fall back to the implicit flow, where Entra sends a `hasgroups` marker instead of the groups once a user is in more than **5** groups. | Set `EnableGraph: true` (the default) and complete [App registration Steps 4–5](entra-appreg.md#step-4-create-a-client-secret) (client secret and Graph permission), then have affected users sign out and back in. |
 | `EntraGroupResolver: '<entry>' is not a GUID; matching it as an app role value or UPN.` (Trace) | Informational. If `<entry>` was meant to be a group, it didn't resolve. | Use the group's object ID. Windows-style entries never match; see [Switching from Windows mode](#switching-from-windows-mode). |
 | Menu is empty, no errors | The user's token has none of the `PermittedGroups` entries. | Check that the groups claim is configured ([Step 3](entra-appreg.md#step-3-add-the-groups-claim)) and that the user signed in again after the change. With [advanced options](entra-advanced.md), also check assignments on the enterprise application and that the user is a **direct** member of any assigned group. |
 
