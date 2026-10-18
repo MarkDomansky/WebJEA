@@ -9,7 +9,8 @@ namespace WebJEA;
 /// </summary>
 public class FormMetadataBuilder
 {
-    public CommandMetadataDto Build(ConfigCmd cmd, PSCmd scriptCmd, PSCmd onloadCmd, string title, bool isGlobalUser)
+    public CommandMetadataDto Build(ConfigCmd cmd, PSCmd scriptCmd, PSCmd onloadCmd, string title, bool isGlobalUser,
+                                    bool showVerbose = true, string defaultRenderMode = null)
     {
         var dto = new CommandMetadataDto
         {
@@ -20,8 +21,8 @@ public class FormMetadataBuilder
             Description = scriptCmd?.ParsedDescription,
             HasScript = scriptCmd != null,
             HasOnload = onloadCmd != null,
-            ShowVerbose = isGlobalUser,
-            RenderMode = cmd.RenderMode
+            ShowVerbose = isGlobalUser && showVerbose,
+            RenderMode = cmd.RenderMode ?? defaultRenderMode ?? "Legacy"
         };
 
         var parameters = scriptCmd != null ? scriptCmd.Parameters : new List<PSCmdParam>();
