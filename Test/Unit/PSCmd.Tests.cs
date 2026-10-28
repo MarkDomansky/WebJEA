@@ -53,6 +53,32 @@ public class PSCmdTests
         Assert.Equal(@"C:\base\scripts\test.ps1", cmd.Script);
     }
 
+    [Theory]
+    [InlineData(@"sub\test.ps1")]
+    [InlineData("sub/test.ps1")]
+    public void Init_RelativeSubdirPath_NormalizesSeparators(string script)
+    {
+        var basePath = Path.Combine(Path.GetTempPath(), "base");
+        var cmd = new PSCmd();
+        cmd.Script = script;
+
+        cmd.Init(basePath, true);
+
+        Assert.Equal(Path.Combine(basePath, "sub", "test.ps1"), cmd.Script);
+    }
+
+    [Fact]
+    public void Init_BasePathWithTrailingSeparator_NoDoubleSeparator()
+    {
+        var basePath = Path.Combine(Path.GetTempPath(), "base") + Path.DirectorySeparatorChar;
+        var cmd = new PSCmd();
+        cmd.Script = "test.ps1";
+
+        cmd.Init(basePath, true);
+
+        Assert.Equal(basePath + "test.ps1", cmd.Script);
+    }
+
     [Fact]
     public void Init_EmptyScript_NoChange()
     {
