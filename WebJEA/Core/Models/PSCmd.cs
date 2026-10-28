@@ -86,21 +86,21 @@ public class PSCmd
 
     private string RebuildPath(string scriptPath, string basePath)
     {
-        if (!string.IsNullOrEmpty(scriptPath))
+        if (string.IsNullOrEmpty(scriptPath))
         {
-            if (scriptPath != Path.GetFullPath(scriptPath))
-            {
-                if (Path.IsPathRooted(scriptPath))
-                {
-                    scriptPath = basePath + scriptPath;
-                }
-                else
-                {
-                    scriptPath = basePath + "\\" + scriptPath;
-                }
-            }
+            return scriptPath;
         }
 
-        return scriptPath;
+        // config files may use either separator; normalize to the host OS
+        scriptPath = scriptPath.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
+
+        if (Path.IsPathFullyQualified(scriptPath))
+        {
+            return scriptPath;
+        }
+
+        // relative ("test.ps1") or rooted-but-unqualified ("\test.ps1" on Windows) paths
+        // resolve under basePath; Path.Join avoids doubling the separator
+        return Path.Join(basePath, scriptPath);
     }
 }
