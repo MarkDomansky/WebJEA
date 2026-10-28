@@ -14,7 +14,7 @@ Write-Host "We html encode script output for safety, <a href='see?'></a>"
 Write-Host "Each script runs in its own instance, so load any scripts you need each time."
 
 write-host "We honor spaces like a <pre>."
-write-host (Get-Process svchost | select -First 2 | out-string)
+write-host (Get-Process | select -First 2 | out-string)
 
 Write-Host "WebJEA generates a usage log that documents all scripts that are run, with user and ip."
 write-host "You can also send messages directly to this log by prefixing a line with 'WEBJEA:'."

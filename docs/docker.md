@@ -1,10 +1,11 @@
 # Running WebJEA in Docker
 
-WebJEA ships a Docker configuration for Linux containers under [docker/](../docker/). The PowerShell 7 engine is embedded in the app, so the image does not install PowerShell separately — but remember that scripts run **inside the container**: only the modules and network access available there are usable.
+WebJEA ships a Docker configuration for Linux containers under [docker/](../docker/). The PowerShell 7 engine is embedded in the app — but remember that scripts run **inside the container**: only the modules and network access available there are usable.
 
 - **Dockerfile:** `docker/Dockerfile`
 - **Compose file:** `docker/docker-compose.yml`
 - **Base image:** `mcr.microsoft.com/dotnet/aspnet:10.0`
+- **Images:** `webjea` (minimal) and `webjea:latest-pwsh` (adds interactive PowerShell for troubleshooting; see [Troubleshooting](#troubleshooting))
 - **Authentication:** Entra ID only
 - **Scripts volume:** `/webjea/scripts`
 - **Logs volume:** `/webjea/logs`
@@ -37,7 +38,7 @@ If using a compose `.env` file, store the secret securely (not in version contro
 
    In `scripts/webjea.json`, set `"BasePath": "/webjea/scripts"` and use Entra group object IDs, app role values, or UPNs in `PermittedGroups` (see [entra.md](entra.md#authorizing-users)).
 
-2. Fill in the `AzureAd__*` values in `docker-compose.yml` (Entra ID is required; Windows/AD authentication needs a Windows host). Prefer a compose `.env` file or secrets over committing the client secret.
+2. Fill in the `AzureAd__*` values in `docker-compose.yml` (Entra ID is required; for Windows/AD authentication see [Installation.md](Installation.md)). Prefer a compose `.env` file or secrets over committing the client secret.
 
 3. Build and run:
 
@@ -89,6 +90,26 @@ volumes:
 ```
 
 WebJEA's own HTTP→HTTPS redirect only ever activates for `WebJEA:HttpPort`/ `HttpsPort`/`CertThumbprint` (the Windows-service hosting path) — it has no effect here, since this path deliberately leaves those unset. There is no way to get an automatic redirect out of WebJEA config in the container path; put a TLS-terminating reverse proxy in front instead (see the recommended setup above), which handles the HTTP→HTTPS redirect correctly regardless of what the container publishes internally.
+
+## Troubleshooting
+
+The minimal image has no interactive shell for PowerShell. To get one, build the `pwsh` variant, which is the same image plus `pwsh`:
+
+```bash
+docker build -f docker/Dockerfile --target pwsh -t webjea:latest-pwsh .
+```
+
+With compose, set `target: pwsh` and `image: webjea:latest-pwsh` in `docker-compose.yml`, then run `docker compose up -d --build`. Then open a shell as the app user:
+
+```bash
+docker exec -it <container> pwsh
+```
+
+From there you can run a registered script by hand (`& /webjea/scripts/foo.ps1`), check which modules are available (`Get-Module -ListAvailable`), or test outbound network access from inside the container.
+
+The shell's PowerShell comes from the .NET SDK image, so its patch version can differ slightly from the engine embedded in WebJEA. Check `$PSVersionTable` if a difference matters.
+
+Run the minimal image in production, and switch to `-pwsh` only while troubleshooting.
 
 ## Notes
 
