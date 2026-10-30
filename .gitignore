@@ -313,3 +313,4 @@ Test/Integration/entra.json
 
 # Superpowers/SDD working files - not part of the repo
 .superpowers/
+.env
