@@ -3,11 +3,16 @@
 #
 # Put your webjea.json and scripts in ./scripts before starting (see
 # docs/docker.md). Linux hosting requires Entra ID authentication.
+name: webjea
 services:
-  webjea:
+  node:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      # To troubleshoot, switch to the variant with an interactive shell:
+      # target: pwsh and image: webjea:latest-pwsh, then
+      # `docker compose up -d --build` and `docker exec -it <container> pwsh`.
+      target: runtime
     image: webjea:latest
     ports:
       - "8080:8080"
