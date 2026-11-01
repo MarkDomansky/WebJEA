@@ -12,7 +12,7 @@ WebJEA ships a Docker configuration for Linux containers under [docker/](../dock
 
 ## Entra ID app registration setup
 
-The container uses Entra ID, which requires an app registration in your Entra ID tenant. Follow the step-by-step walkthrough in [Entra App Registration](entra-appreg.md) (create the registration, enable ID tokens, add the groups claim, create a client secret and grant Graph permission), then map the values you collected to environment variables.
+The container uses Entra ID, which requires an app registration in your Entra ID tenant. Follow the step-by-step walkthrough in [Entra App Registration](entra-appreg.md) (create the registration, enable ID tokens, add the groups claim, add a client credential and grant Graph permission), then map the values you collected to environment variables.
 
 In your `docker-compose.yml` or `.env` file, set:
 
@@ -20,11 +20,31 @@ In your `docker-compose.yml` or `.env` file, set:
 AzureAd__Instance=https://login.microsoftonline.com/
 AzureAd__TenantId=<Directory (tenant) ID from step 1>
 AzureAd__ClientId=<Application (client) ID from step 1>
-AzureAd__ClientSecret=<Value from step 4>
 Authentication__Mode=Entra
 ```
 
-If using a compose `.env` file, store the secret securely (not in version control) and reference it: `AzureAd__ClientSecret=${WEBJEA_CLIENT_SECRET}`.
+Then add **one** client credential from [Step 4](entra-appreg.md#step-4-add-a-client-credential).
+
+**Certificate (recommended):** mount the PFX file read-only and point WebJEA at it:
+
+```yaml
+environment:
+  AzureAd__ClientCredentials__0__SourceType: Path
+  AzureAd__ClientCredentials__0__CertificateDiskPath: /certs/graph.pfx
+  AzureAd__ClientCredentials__0__CertificatePassword: ${WEBJEA_GRAPH_PFX_PASSWORD}
+volumes:
+  - ./certs:/certs:ro
+```
+
+The container runs as the non-root `app` user, so the file must be readable by it (e.g. `chmod 644 certs/graph.pfx`, protected by its password). If your secret store can only inject environment variables, use `SourceType: Base64Encoded` with `AzureAd__ClientCredentials__0__Base64EncodedValue` set to the Base64 of the whole `.pfx` (plus `CertificatePassword` as above), and no volume.
+
+**Client secret:**
+
+```bash
+AzureAd__ClientSecret=<Value from step 4>
+```
+
+If using a compose `.env` file, store the secret or PFX password securely (not in version control) and reference it, e.g. `AzureAd__ClientSecret=${WEBJEA_CLIENT_SECRET}`.
 
 ## Quick start
 
@@ -38,7 +58,7 @@ If using a compose `.env` file, store the secret securely (not in version contro
 
    In `scripts/webjea.json`, set `"BasePath": "/webjea/scripts"` and use Entra group object IDs, app role values, or UPNs in `PermittedGroups` (see [entra.md](entra.md#authorizing-users)).
 
-2. Fill in the `AzureAd__*` values in `docker-compose.yml` (Entra ID is required; for Windows/AD authentication see [Installation.md](Installation.md)). Prefer a compose `.env` file or secrets over committing the client secret.
+2. Fill in the `AzureAd__*` values in `docker-compose.yml` (Entra ID is required; for Windows/AD authentication see [Installation.md](Installation.md)). Prefer a compose `.env` file or secrets over committing the client secret or PFX password.
 
 3. Build and run:
 
@@ -63,7 +83,7 @@ WebJEA's session state is in-memory per container, so scaling an instance beyond
 
 ### Per-instance identity
 
-Give each instance its own Entra app registration (separate client ID/secret and redirect URI), so each can carry different group/app-role assignments and Microsoft Graph permissions.
+Give each instance its own Entra app registration (separate client ID, client credential and redirect URI), so each can carry different group/app-role assignments and Microsoft Graph permissions.
 
 ## Configuration
 

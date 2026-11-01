@@ -393,11 +393,12 @@ function Step_EntraAppRegistration([string]$RedirectUri)
             '  1. New app registration in your tenant; record Tenant ID and Client ID.'
             "  2. Add a Web redirect URI: $RedirectUri"
             '  3. Enable ID tokens; add the groups claim.'
-            '  4. Create a client secret; record its value.'
+            '  4. Add a client credential: upload a certificate (Option A; for the'
+            '     container, keep its .pfx) or create a client secret (Option B).'
             '  5. Grant GroupMember.Read.All (delegated) with admin consent.'
         )
         Verify = @(
-            'Tenant ID, Client ID, and client secret recorded'
+            'Tenant ID, Client ID, and client credential (certificate or secret) recorded'
             "Redirect URI $RedirectUri saved on the registration"
         )
     }
@@ -629,6 +630,8 @@ function Get-Scenarios
                     '(TenantId, ClientId, ClientSecret). Prefer a .env file over committing the'
                     'secret: put WEBJEA_CLIENT_SECRET=... in docker\.env and reference it as'
                     'AzureAd__ClientSecret: ${WEBJEA_CLIENT_SECRET}.'
+                    'For a certificate, use the commented AzureAd__ClientCredentials__0__*'
+                    'lines and ./certs mount instead of ClientSecret (docs/docker.md).'
                 )
                 Code   = @(
                     'cd <repo-root>\docker'

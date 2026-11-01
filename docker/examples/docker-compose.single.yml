@@ -2,7 +2,9 @@
 #
 #   1. Build the image from the repo root:  docker build -f docker/Dockerfile -t webjea .
 #   2. Create an Entra app registration (docs/entra.md) and fill in the .env values
-#      referenced below (TENANT_ID, CLIENT_ID, WEBJEA_CLIENT_SECRET).
+#      referenced below (TENANT_ID, CLIENT_ID, WEBJEA_CLIENT_SECRET). For a certificate
+#      instead of a secret, use the commented ClientCredentials lines and ./certs mount
+#      (docs/docker.md).
 #   3. Put your webjea.json + scripts in ./scripts
 #   4. docker compose -f docker-compose.single.yml up -d
 #
@@ -18,8 +20,12 @@ services:
       AzureAd__TenantId: ${TENANT_ID}
       AzureAd__ClientId: ${CLIENT_ID}
       AzureAd__ClientSecret: ${WEBJEA_CLIENT_SECRET}
+      # AzureAd__ClientCredentials__0__SourceType: Path
+      # AzureAd__ClientCredentials__0__CertificateDiskPath: /certs/graph.pfx
+      # AzureAd__ClientCredentials__0__CertificatePassword: ${WEBJEA_GRAPH_PFX_PASSWORD}
       AzureAd__CallbackPath: /signin-oidc
     volumes:
       - ./scripts:/webjea/scripts
       - ./logs:/webjea/logs
+      # - ./certs:/certs:ro
     restart: unless-stopped

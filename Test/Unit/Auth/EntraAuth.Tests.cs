@@ -285,6 +285,85 @@ public class EntraGroupResolverTests
     }
 }
 
+public class GraphCredentialTests
+{
+    private static string Describe(Dictionary<string, string> azureAd)
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(azureAd.ToDictionary(kv => "AzureAd:" + kv.Key, kv => kv.Value))
+            .Build();
+        return EntraAuthExtensions.DescribeGraphCredential(config.GetSection("AzureAd"));
+    }
+
+    [Fact]
+    public void NoCredential_IsEmpty()
+    {
+        Assert.Equal("", Describe(new Dictionary<string, string> { ["ClientId"] = "x" }));
+    }
+
+    [Fact]
+    public void EmptyClientSecret_CountsAsNone()
+    {
+        Assert.Equal("", Describe(new Dictionary<string, string> { ["ClientSecret"] = "" }));
+    }
+
+    [Fact]
+    public void ClientSecret_IsDescribedWithoutItsValue()
+    {
+        string description = Describe(new Dictionary<string, string> { ["ClientSecret"] = "s3cr3t" });
+
+        Assert.Equal("client secret", description);
+        Assert.DoesNotContain("s3cr3t", description);
+    }
+
+    [Theory]
+    [InlineData("StoreWithDistinguishedName")]
+    [InlineData("StoreWithThumbprint")]
+    [InlineData("Path")]
+    [InlineData("Base64Encoded")]
+    [InlineData("KeyVault")]
+    public void ClientCredentialsCertificate_NamesItsSourceType(string sourceType)
+    {
+        Assert.Equal("certificate (" + sourceType + ")", Describe(new Dictionary<string, string>
+        {
+            ["ClientCredentials:0:SourceType"] = sourceType,
+            ["ClientCredentials:0:CertificateDistinguishedName"] = "CN=WebJEA-Graph"
+        }));
+    }
+
+    [Fact]
+    public void ClientCredentials_TakesPrecedenceOverClientSecret()
+    {
+        Assert.Equal("certificate (Path)", Describe(new Dictionary<string, string>
+        {
+            ["ClientSecret"] = "s3cr3t",
+            ["ClientCredentials:0:SourceType"] = "Path",
+            ["ClientCredentials:0:CertificateDiskPath"] = "/certs/graph.pfx"
+        }));
+    }
+
+    [Fact]
+    public void ClientCredentialsSecretEntry_IsAClientSecret()
+    {
+        Assert.Equal("client secret", Describe(new Dictionary<string, string>
+        {
+            ["ClientCredentials:0:SourceType"] = "ClientSecret",
+            ["ClientCredentials:0:ClientSecret"] = "s3cr3t"
+        }));
+    }
+
+    [Fact]
+    public void LegacyClientCertificates_AreListedBeforeClientSecret()
+    {
+        Assert.Equal("certificate (StoreWithThumbprint), client secret", Describe(new Dictionary<string, string>
+        {
+            ["ClientSecret"] = "s3cr3t",
+            ["ClientCertificates:0:SourceType"] = "StoreWithThumbprint",
+            ["ClientCertificates:0:CertificateThumbprint"] = "ABCDEF"
+        }));
+    }
+}
+
 public class ClaimsUserContextTests
 {
     [Fact]
