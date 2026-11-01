@@ -146,7 +146,7 @@ Task StopVM_Web -Depends Init {
 # ---------------------------------------------------------------------------
 #  Deploy tasks
 # ---------------------------------------------------------------------------
-#TODO Create a certificate on the remote server, update the settings file with the thumbprint
+#TODO Create a certificate on the remote server whose subject matches the settings file's CertSubject
 
 Task CleanBuildOutput -Depends Init -PreCondition { -not $script:useGithubBuild -and -not $script:quickBuild } {
     if (-not (Test-Path $script:buildInfoFile)) { New-Item -Path $script:buildOutputDir -ItemType directory -Force | Out-Null }
@@ -467,7 +467,7 @@ Task RevertVMs -Depends RevertSnapshot_Web {
 Task ConfigureAuth -Depends GetCredential -PreCondition { $script:auth } {
     # Merges appsettings.Production.json (next to config.json) into the deployed site's
     # appsettings.Production.json rather than replacing it: Deploy.ps1 already wrote
-    # ConfigFile, ports, and the cert thumbprint there.
+    # ConfigFile and the Kestrel endpoints (ports + certificate subject) there.
     $overlayPath = Join-Path (Split-Path $script:configPath) 'appsettings.Production.json'
     Assert (Test-Path $overlayPath) "Auth settings file not found: $overlayPath. Copy appsettings.Production.template.json to appsettings.Production.json and fill it in."
     $overlay = Get-Content -Path $overlayPath -Raw | ConvertFrom-Json
@@ -557,8 +557,10 @@ Task ConfigureAuth -Depends GetCredential -PreCondition { $script:auth } {
             Restart-Service -Name $ServiceName -Force
 
             # Wait for Kestrel to bind; a bad auth config stops the service at startup
-            $port = [int]$settings.WebJEA.HttpsPort
-            if (-not $port) { $port = [int]$settings.WebJEA.HttpPort }
+            # Deploy.ps1 writes Kestrel:Endpoints with Urls like "https://*:443".
+            $endpoints = $settings.Kestrel.Endpoints
+            $url = if ($endpoints.Https) { $endpoints.Https.Url } else { $endpoints.Http.Url }
+            $port = if ($url -match ':(\d+)/?$') { [int]$Matches[1] } else { 0 }
             $deadline = (Get-Date).AddSeconds(60)
             do
             {

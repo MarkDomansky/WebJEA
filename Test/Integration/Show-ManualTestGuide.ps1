@@ -164,12 +164,12 @@ function Step_DnsAndCert([bool]$Core)
             ''
             '# Self-signed certificate for testing (on the TARGET server, elevated):'
             "`$cert = New-SelfSignedCertificate -DnsName 'webjea-test.corp.example.com' -CertStoreLocation Cert:\LocalMachine\My"
-            '$cert.Thumbprint    # record this for settings.json CertThumbprint'
+            '$cert.Subject    # CN=webjea-test.corp.example.com -> settings.json CertSubject'
         )
-        Note   = 'HTTP-only test: set HttpsPort to 0 in settings.json and skip the certificate - HTTP is only ever redirected to HTTPS automatically when HttpPort, HttpsPort, and CertThumbprint are all set, so leaving HttpsPort at 0 is enough. Deploy.ps1 will refuse an HTTP-only install unless you pass -AllowHttpWithoutRedirect. Browsers will warn on a self-signed cert - expected in a lab.'
+        Note   = 'A self-signed certificate is not trusted by the server, so set AllowUntrustedCert to true in settings.json - Deploy.ps1 otherwise stops with an UntrustedRoot error. Browsers will warn on it too - expected in a lab. HTTP-only test: set HttpsPort to 0 and skip the certificate - HTTP is only redirected to HTTPS when there is an HTTPS listener, so leaving HttpsPort at 0 is enough. Deploy.ps1 will refuse an HTTP-only install unless you pass -AllowHttpWithoutRedirect.'
         Verify = @(
             'From the test client: ping/nslookup of the FQDN reaches the server'
-            'The certificate thumbprint is recorded'
+            'The certificate exists in LocalMachine\My with the FQDN as its subject'
         )
     }
 }
@@ -213,8 +213,9 @@ function Step_CopyAndSettings([int]$HttpPort, [int]$HttpsPort, [string]$PortNote
         '  ServiceUserName     = account from the previous step (ServicePassword if not gMSA)'
         "  HttpPort            = $HttpPort"
         "  HttpsPort           = $HttpsPort"
-        '  CertThumbprint      = thumbprint from the cert step (when HttpsPort > 0;'
+        '  CertSubject         = the FQDN from the cert step (when HttpsPort > 0;'
         '                        HTTP is then redirected to HTTPS automatically)'
+        '  AllowUntrustedCert  = true                (self-signed lab certificate)'
         '  SitePath            = C:\inetpub\webjea   (app binaries; default is fine)'
         '  ScriptsPath         = C:\webjea           (webjea.json + your .ps1 scripts)'
         '  LogPath             = C:\webjea           (webjea.log / webjea-usage.log)'
@@ -322,7 +323,7 @@ function Step_VerifyService([int]$HttpPort, [int]$HttpsPort, [bool]$Core)
             'Get-Content C:\webjea\webjea-usage.log -Tail 5   # exists after you run a script'
         )
         Verify = @(
-            "Browser: $httpUrl redirects to HTTPS (automatic - HttpPort/HttpsPort/CertThumbprint are all set)"
+            "Browser: $httpUrl redirects to HTTPS (automatic - both HttpPort and HttpsPort are set)"
             "Browser: $httpsUrl signs you in and shows the dashboard"
             "The 'Overview' command loads; its onload script INTENTIONALLY raises errors"
             '  (12/0, Write-Error) - the page must still return HTTP 200 and render the'
@@ -369,8 +370,8 @@ function Step_ServerCleanup
             'sc.exe delete WebJEA'
             'Remove-Item C:\inetpub\webjea, C:\webjea, C:\deploy -Recurse -Force'
             "Get-NetFirewallRule -DisplayName 'WebJEA*' | Remove-NetFirewallRule"
-            '# Remove the test cert (thumbprint from settings.json) and any hosts entries:'
-            'Remove-Item Cert:\LocalMachine\My\<thumbprint>'
+            '# Remove the test cert (subject from settings.json CertSubject) and any hosts entries:'
+            "Get-ChildItem Cert:\LocalMachine\My | Where-Object Subject -eq 'CN=<CertSubject>' | Remove-Item"
         )
         Verify = @('Service, folders, firewall rules, and test cert are gone')
     }
@@ -508,7 +509,7 @@ function Get-Scenarios
                     'Edit C:\deploy\settings.json:'
                     '  HttpPort  = 8080'
                     '  HttpsPort = 8443   (redirects 8080 -> the HTTPS port automatically,'
-                    '                      since CertThumbprint is already set)'
+                    '                      since there is an HTTPS listener)'
                 )
                 Code   = @(
                     'pwsh -File .\Deploy.ps1 -SettingsFile .\settings.json -TestOnly   # review'

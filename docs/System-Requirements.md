@@ -19,15 +19,30 @@ We strongly recommend a **gMSA** (group Managed Service Account) to run the WebJ
 
 ## Certificate (recommended)
 
-A certificate is not technically required (HTTP-only installs are possible), but if you pass sensitive data to or from users you may be exposing it to untrusted networks. Enabling the HTTPS listener requires a certificate in the `LocalMachine\My` store whose subject or SANs cover every host name users browse to, imported **with its private key** (a public-key-only certificate cannot complete a TLS handshake; `Deploy.ps1` rejects one).
+A certificate is not technically required (HTTP-only installs are possible), but if you pass sensitive data to or from users you may be exposing it to untrusted networks. Enabling the HTTPS listener requires a certificate in the `LocalMachine\My` store that:
+
+* is imported **with its private key** — a public-key-only certificate cannot complete a TLS handshake;
+* covers every host name users browse to in its subject or SANs (wildcard SANs count);
+* allows **Server Authentication** (or has no enhanced key usage restriction at all);
+* is in date; and
+* is **trusted by this server** — its chain builds to a root in the machine's trust store and its revocation status can be checked. Certificates from an internal enterprise CA qualify once that CA's chain is installed, which domain-joined servers normally receive through Group Policy.
+
+`Deploy.ps1` checks all of these before it changes anything, and stops with the reason when one fails. For a lab or self-signed certificate, set `AllowUntrustedCert` to `true`: the trust check becomes a warning (and Kestrel is told to accept the certificate), while the other checks still apply.
+
+### How the certificate is selected
+
+WebJEA uses Kestrel's built-in certificate configuration: the `CertSubject` setting is written to `Kestrel:Endpoints:Https:Certificate:Subject`, and Kestrel picks the certificate itself every time the service starts. Kestrel looks for certificates whose **subject contains** that text (case-insensitive; SANs are not searched), skips any without Server Authentication or a private key — and, unless `AllowUntrustedCert` is set, any that are untrusted or out of date — then serves the one with the **latest expiry date**.
+
+Because of that, a renewed certificate with the same subject takes over on the next service restart, without any settings change. Keep `CertSubject` specific enough to match only the certificates you intend: `example.com` would also match `CN=intranet.example.com`. `Deploy.ps1` warns when the matches have different subjects.
 
 ### Private key permissions
 
 Putting the certificate in `LocalMachine\My` is not by itself enough for a non-admin service account. The store's contents are readable by everyone, but the *private key file* behind the certificate is created with permissions for `SYSTEM` and the local `Administrators` group only. If the service account cannot read that file, Kestrel cannot open the key and the HTTPS listener fails at startup — which is why running the service as an administrator "fixes" it.
 
-`Deploy.ps1` grants the service account plain **Read** on that file as part of the Service section, so the account can stay an ordinary user. To do it by hand, or to check what is currently granted: `certlm.msc` → the certificate → **All Tasks** → **Manage Private Keys** → Add. For a gMSA, click **Object Types** and tick *Service Accounts* first, or the account will not be found.
+`Deploy.ps1` grants the service account plain **Read** on that file as part of the Service section, so the account can stay an ordinary user. It does this for **every** certificate matching `CertSubject`, not just the one served today. To do it by hand, or to check what is currently granted: `certlm.msc` → the certificate → **All Tasks** → **Manage Private Keys** → Add. For a gMSA, click **Object Types** and tick *Service Accounts* first, or the account will not be found.
 
-> **On renewal:** a renewed certificate normally has a **new** private key file, which starts out with the default admins-only permissions again. Re-run `Deploy.ps1` after updating `CertThumbprint` (or re-apply the grant manually) — otherwise the service keeps working until its next restart and then fails to start its HTTPS listener.
+> [!IMPORTANT]
+> **On renewal:** a renewed certificate normally has a **new** private key file, which starts out with the default admins-only permissions again. The settings file doesn't change, but after importing the renewed certificate, re-run `.\Deploy.ps1 -SettingsFile .\settings.json -OnlySections Service` (or re-apply the grant manually) **before** the service next restarts. Kestrel will select the renewed certificate on restart, and the HTTPS listener fails if the service account cannot read its key.
 
 Certificates whose keys live in a TPM, HSM, or smart card have no file to permission this way. `Deploy.ps1` warns and moves on; grant access with that provider's own tooling.
 

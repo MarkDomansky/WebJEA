@@ -1,4 +1,4 @@
-using WebJEA;
+using Microsoft.Extensions.Configuration;
 using WebJEA.Hosting;
 using Xunit;
 
@@ -6,87 +6,34 @@ namespace WebJEA.Tests.Hosting;
 
 public class KestrelEndpointsTests
 {
-    [Fact]
-    public void IsConfigured_IsFalse_WhenNoPortsSet()
+    private static IConfiguration Config(Dictionary<string, string> values)
     {
-        Assert.False(KestrelEndpoints.IsConfigured(new WebJeaOptions()));
-    }
-
-    [Theory]
-    [InlineData(80, null)]
-    [InlineData(null, 443)]
-    [InlineData(80, 443)]
-    public void IsConfigured_IsTrue_WhenAnyPortSet(int? http, int? https)
-    {
-        var options = new WebJeaOptions { HttpPort = http, HttpsPort = https, CertThumbprint = "AB12" };
-        Assert.True(KestrelEndpoints.IsConfigured(options));
+        return new ConfigurationBuilder().AddInMemoryCollection(values).Build();
     }
 
     [Fact]
-    public void IsConfigured_IsFalse_WhenPortsAreZero()
+    public void RejectLegacySettings_DoesNotThrow_WhenNoLegacyKeys()
     {
-        // Deploy.ps1 writes 0 to mean "listener disabled"; treat it like absent.
-        Assert.False(KestrelEndpoints.IsConfigured(new WebJeaOptions { HttpPort = 0, HttpsPort = 0 }));
-    }
-
-    [Fact]
-    public void Validate_Throws_WhenNoPortsEnabled()
-    {
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => KestrelEndpoints.Validate(new WebJeaOptions()));
-        Assert.Contains("HttpPort", ex.Message);
-        Assert.Contains("HttpsPort", ex.Message);
-    }
-
-    [Fact]
-    public void Validate_Throws_WhenHttpsEnabledWithoutThumbprint()
-    {
-        var options = new WebJeaOptions { HttpsPort = 443 };
-        var ex = Assert.Throws<InvalidOperationException>(() => KestrelEndpoints.Validate(options));
-        Assert.Contains("CertThumbprint", ex.Message);
-    }
-
-    [Fact]
-    public void Validate_HttpOnly_DoesNotThrow()
-    {
-        KestrelEndpoints.Validate(new WebJeaOptions { HttpPort = 80 });
-    }
-
-    [Fact]
-    public void Validate_HttpsOnly_WithThumbprint_DoesNotThrow()
-    {
-        var options = new WebJeaOptions { HttpsPort = 443, CertThumbprint = "AB12" };
-        KestrelEndpoints.Validate(options);
-    }
-
-    [Fact]
-    public void LoadCertificate_Throws_WithHelpfulMessage_WhenNotFound()
-    {
-        // 40 hex chars that will never match a real cert.
-        const string thumbprint = "0000000000000000000000000000000000000000";
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => KestrelEndpoints.LoadCertificate(thumbprint));
-        Assert.Contains(thumbprint, ex.Message);
-        Assert.Contains("LocalMachine", ex.Message);
-    }
-
-    [Theory]
-    [InlineData(80, 443, "AB12", true)]
-    [InlineData(null, 443, "AB12", false)]
-    [InlineData(0, 443, "AB12", false)]
-    [InlineData(80, null, "AB12", false)]
-    [InlineData(80, 0, "AB12", false)]
-    [InlineData(80, 443, null, false)]
-    [InlineData(80, 443, "", false)]
-    public void ShouldRedirectHttpToHttps_RequiresAllThreeSettings(
-        int? httpPort, int? httpsPort, string certThumbprint, bool expected)
-    {
-        var options = new WebJeaOptions
+        KestrelEndpoints.RejectLegacySettings(Config(new Dictionary<string, string>
         {
-            HttpPort = httpPort,
-            HttpsPort = httpsPort,
-            CertThumbprint = certThumbprint
-        };
-        Assert.Equal(expected, options.ShouldRedirectHttpToHttps);
+            ["WebJEA:ConfigFile"] = @"c:\webjea\scripts\webjea.json",
+            ["Kestrel:Endpoints:Https:Url"] = "https://*:443"
+        }));
+    }
+
+    [Theory]
+    [InlineData("WebJEA:HttpPort", "80")]
+    [InlineData("WebJEA:HttpsPort", "443")]
+    [InlineData("WebJEA:CertThumbprint", "AB12")]
+    // Deploy.ps1 wrote 0 / "" to mean "disabled"; the key is still retired.
+    [InlineData("WebJEA:HttpPort", "0")]
+    [InlineData("WebJEA:CertThumbprint", "")]
+    public void RejectLegacySettings_Throws_NamingTheKey(string key, string value)
+    {
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => KestrelEndpoints.RejectLegacySettings(Config(new Dictionary<string, string> { [key] = value })));
+        Assert.Contains(key, ex.Message);
+        Assert.Contains("Kestrel:Endpoints", ex.Message);
+        Assert.Contains("Deploy.ps1", ex.Message);
     }
 }

@@ -1,4 +1,3 @@
-using System.Net;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Negotiate;
 using Microsoft.AspNetCore.Authorization;
@@ -29,42 +28,18 @@ builder.Host.UseWindowsService();
 builder.Logging.ClearProviders();
 builder.Host.UseNLog();
 
-// Windows-service hosting: WebJEA:HttpPort/HttpsPort configure Kestrel listeners in code
-// (cert by thumbprint from LocalMachine\My). When neither is set — containers, dev — Kestrel
-// keeps its default configuration (ASPNETCORE_URLS / launchSettings).
-var endpointOptions = builder.Configuration.GetSection("WebJEA").Get<WebJeaOptions>() ?? new WebJeaOptions();
-if (KestrelEndpoints.IsConfigured(endpointOptions))
-{
-    KestrelEndpoints.Validate(endpointOptions);
-}
-
-builder.WebHost.ConfigureKestrel(options =>
-{
-    options.AddServerHeader = false;
-    if ((endpointOptions.HttpPort ?? 0) > 0)
-    {
-        options.Listen(IPAddress.Any, endpointOptions.HttpPort.Value);
-    }
-    if ((endpointOptions.HttpsPort ?? 0) > 0)
-    {
-        options.Listen(IPAddress.Any, endpointOptions.HttpsPort.Value,
-            listen => listen.UseHttps(KestrelEndpoints.LoadCertificate(endpointOptions.CertThumbprint)));
-    }
-});
+// Listeners and the HTTPS certificate are native Kestrel configuration: Kestrel:Endpoints
+// (written by Deploy.ps1 for the Windows service, cert selected by subject from
+// LocalMachine\My), or ASPNETCORE_URLS + Kestrel:Certificates in containers.
+builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
 
 builder.Services.Configure<WebJeaOptions>(builder.Configuration.GetSection("WebJEA"));
 
-// Native HTTP->HTTPS redirect (replaces the IIS URL Rewrite rule). Options are bound
-// lazily so WebJEA:HttpPort/HttpsPort/CertThumbprint come from the fully-composed
-// configuration rather than an eager read at startup.
-builder.Services.AddOptions<HttpsRedirectionOptions>()
-    .Configure<IOptions<WebJeaOptions>>((options, webjea) =>
-    {
-        options.RedirectStatusCode = StatusCodes.Status308PermanentRedirect;
-        // ShouldRedirectHttpToHttps guarantees HttpsPort > 0 whenever this option is
-        // actually consumed (see the UseWhen branch below), so no fallback is needed.
-        options.HttpsPort = webjea.Value.HttpsPort;
-    });
+// Native HTTP->HTTPS redirect (replaces the IIS URL Rewrite rule). The HTTPS port is
+// discovered by the middleware itself: HTTPS_PORT if set, otherwise the single bound
+// https address. With no HTTPS listener it logs one warning and serves HTTP unchanged.
+builder.Services.Configure<HttpsRedirectionOptions>(options =>
+    options.RedirectStatusCode = StatusCodes.Status308PermanentRedirect);
 
 bool isDevelopment = builder.Environment.IsDevelopment();
 string authMode = builder.Configuration["Authentication:Mode"] ?? "Windows";
@@ -117,6 +92,9 @@ builder.Services.AddSession(options =>
 
 var app = builder.Build();
 
+// Checked against the fully-composed configuration, before Kestrel binds in app.Run().
+KestrelEndpoints.RejectLegacySettings(app.Configuration);
+
 // Reverse-proxy path routing (container sub-site scenario): serve everything under
 // e.g. /hr. Must be first in the pipeline.
 string pathBase = app.Services.GetRequiredService<IOptions<WebJeaOptions>>().Value.PathBase;
@@ -131,9 +109,7 @@ if (!app.Environment.IsDevelopment())
 }
 
 // Before authentication so plain-HTTP requests are redirected instead of challenged.
-app.UseWhen(
-    context => context.RequestServices.GetRequiredService<IOptions<WebJeaOptions>>().Value.ShouldRedirectHttpToHttps,
-    branch => branch.UseHttpsRedirection());
+app.UseHttpsRedirection();
 
 app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseMiddleware<LegacyRedirectMiddleware>();

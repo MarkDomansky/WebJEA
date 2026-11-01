@@ -6,8 +6,9 @@ using Xunit;
 namespace WebJEA.Tests.Api;
 
 /// <summary>
-/// Same fixture setup as <see cref="WebJeaApiFactory"/> but with HttpPort, HttpsPort,
-/// and CertThumbprint all set, so WebJeaOptions.ShouldRedirectHttpToHttps is true.
+/// Same fixture setup as <see cref="WebJeaApiFactory"/> with HTTPS_PORT set. TestServer has
+/// no bound addresses, so this is the redirect middleware's config fallback; a real
+/// Windows-service install gets the port from its bound Kestrel:Endpoints:Https listener.
 /// </summary>
 public class HttpsRedirectFactory : WebJeaApiFactory
 {
@@ -18,9 +19,7 @@ public class HttpsRedirectFactory : WebJeaApiFactory
         {
             cfg.AddInMemoryCollection(new Dictionary<string, string>
             {
-                ["WebJEA:HttpPort"] = "8080",
-                ["WebJEA:HttpsPort"] = "8443",
-                ["WebJEA:CertThumbprint"] = "AB12"
+                ["HTTPS_PORT"] = "8443"
             });
         });
     }
@@ -63,44 +62,25 @@ public class HttpsRedirectTests : IClassFixture<HttpsRedirectFactory>
 
         response.EnsureSuccessStatusCode();
     }
-
-    // The redirect-disabled path (default configuration, no ports set at all) is
-    // exercised by every test in ApiEndpointsTests: WebJeaApiFactory serves
-    // plain-HTTP requests with 200s.
 }
 
 /// <summary>
-/// HttpPort alone (no HttpsPort/CertThumbprint) is a valid HTTP-only configuration:
-/// ShouldRedirectHttpToHttps requires all three settings, so plain HTTP is served
-/// normally with no redirect. This is what Deploy.ps1 -AllowHttpWithoutRedirect
-/// installs produce.
+/// No HTTPS listener and no HTTPS_PORT: the redirect middleware cannot determine a port, so
+/// plain HTTP is served normally. This is what Deploy.ps1 -AllowHttpWithoutRedirect installs
+/// (and containers behind a TLS-terminating proxy) look like. The base WebJeaApiFactory is
+/// already exactly this configuration.
 /// </summary>
-public class HttpOnlyNoRedirectFactory : WebJeaApiFactory
+public class HttpOnlyNoRedirectTests : IClassFixture<WebJeaApiFactory>
 {
-    protected override void ConfigureWebHost(IWebHostBuilder builder)
-    {
-        base.ConfigureWebHost(builder);
-        builder.ConfigureAppConfiguration((_, cfg) =>
-        {
-            cfg.AddInMemoryCollection(new Dictionary<string, string>
-            {
-                ["WebJEA:HttpPort"] = "8080"
-            });
-        });
-    }
-}
+    private readonly WebJeaApiFactory _factory;
 
-public class HttpOnlyNoRedirectTests : IClassFixture<HttpOnlyNoRedirectFactory>
-{
-    private readonly HttpOnlyNoRedirectFactory _factory;
-
-    public HttpOnlyNoRedirectTests(HttpOnlyNoRedirectFactory factory)
+    public HttpOnlyNoRedirectTests(WebJeaApiFactory factory)
     {
         _factory = factory;
     }
 
     [Fact]
-    public async Task HttpRequest_WithNoHttpsPortOrCert_IsServedNormally()
+    public async Task HttpRequest_WithNoHttpsPort_IsServedNormally()
     {
         var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
         {
@@ -111,5 +91,32 @@ public class HttpOnlyNoRedirectTests : IClassFixture<HttpOnlyNoRedirectFactory>
         var response = await client.GetAsync("/api/config");
 
         response.EnsureSuccessStatusCode();
+    }
+}
+
+/// <summary>An appsettings file from an earlier alpha (WebJEA:HttpPort etc.) must stop startup.</summary>
+public class LegacyEndpointSettingsFactory : WebJeaApiFactory
+{
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        base.ConfigureWebHost(builder);
+        builder.ConfigureAppConfiguration((_, cfg) =>
+        {
+            cfg.AddInMemoryCollection(new Dictionary<string, string>
+            {
+                ["WebJEA:HttpsPort"] = "443"
+            });
+        });
+    }
+}
+
+public class LegacyEndpointSettingsTests
+{
+    [Fact]
+    public void Startup_Fails_WhenLegacyPortSettingPresent()
+    {
+        using var factory = new LegacyEndpointSettingsFactory();
+        var ex = Assert.ThrowsAny<Exception>(() => factory.CreateClient());
+        Assert.Contains("WebJEA:HttpsPort", ex.ToString());
     }
 }
