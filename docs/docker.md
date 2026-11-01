@@ -78,7 +78,7 @@ Anything in `appsettings.json` can be overridden with environment variables usin
 
 The recommended setup is a TLS-terminating reverse proxy (nginx, Traefik, YARP, an ingress controller) in front of the container, forwarding to port 8080. The proxy handles the 80→443 redirect in that case.
 
-If you expose the container directly and terminate TLS in Kestrel, configure the certificate purely through standard Kestrel configuration — do **not** set `WebJEA__HttpsPort`. `WebJEA:HttpsPort` is Windows-service-only: it tells `KestrelEndpoints` (see [Hosting/KestrelEndpoints.cs](../WebJEA/Hosting/KestrelEndpoints.cs)) to open a Kestrel listener itself and load a certificate by thumbprint from the Windows `LocalMachine\My` certificate store — a store that doesn't exist on Linux, and setting it without `WebJEA:CertThumbprint` also makes `KestrelEndpoints.Validate` throw at startup, crash-looping the container. Use `ASPNETCORE_URLS` plus `Kestrel__Certificates__Default__*` instead, which Kestrel honors natively:
+If you expose the container directly and terminate TLS in Kestrel, configure it through standard Kestrel configuration. WebJEA has no listener or certificate settings of its own (the Windows service uses the same native `Kestrel:Endpoints` configuration, written by `Deploy.ps1`). Use `ASPNETCORE_URLS` plus `Kestrel__Certificates__Default__*`:
 
 ```yaml
 environment:
@@ -89,7 +89,7 @@ volumes:
   - ./certs:/https:ro
 ```
 
-WebJEA's own HTTP→HTTPS redirect only ever activates for `WebJEA:HttpPort`/ `HttpsPort`/`CertThumbprint` (the Windows-service hosting path) — it has no effect here, since this path deliberately leaves those unset. There is no way to get an automatic redirect out of WebJEA config in the container path; put a TLS-terminating reverse proxy in front instead (see the recommended setup above), which handles the HTTP→HTTPS redirect correctly regardless of what the container publishes internally.
+With an `https` URL bound like this, WebJEA redirects plain-HTTP requests to it automatically (HTTP 308). The redirect middleware discovers the HTTPS port from the bound address, or from `ASPNETCORE_HTTPS_PORT` if the published port differs. With only `http://+:8080` bound (the default), nothing is redirected. Behind a TLS-terminating proxy, `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true` (set in the image) makes proxied requests count as HTTPS, so the proxy remains the recommended setup.
 
 ## Troubleshooting
 

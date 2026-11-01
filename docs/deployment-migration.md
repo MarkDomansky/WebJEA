@@ -6,15 +6,16 @@ WebJEA is an ASP.NET Core application on .NET 10. The release zip's `site/` fold
 
 `Deploy.ps1` (shipped in the release zip) installs and configures a self-contained Windows Server deployment. It hosts WebJEA as a Kestrel-backed **Windows service** — IIS is not installed or used.
 
-1. Copy the extracted release to the server, copy `settings.template.json` to `settings.json` and fill in with server specific settings. (service name, gMSA identity, listener ports, certificate thumbprint, scripts/log paths — see [Installation.md](Installation.md#settings-reference) for every setting and the schema changes below), save.
+1. Copy the extracted release to the server, copy `settings.template.json` to `settings.json` and fill in with server specific settings. (service name, gMSA identity, listener ports, certificate subject, scripts/log paths — see [Installation.md](Installation.md#settings-reference) for every setting and the schema changes below), save.
 2. From an elevated prompt — **Windows PowerShell 5.1 (`powershell.exe`) or PowerShell 7 (`pwsh`)**, either works — run: `.\Deploy.ps1 -SettingsFile .\settings.json` (add `-TestOnly` to see what would change, or restrict the run with `-OnlySections Server,Service,WebJEA,Finalize`).
 
 What it does:
 
 - Copies the self-contained `dotnet publish` output to `SitePath` — no **.NET Hosting Bundle**, IIS features, or any other runtime prerequisite to install on the server; `WebJEA.exe` runs standalone. A running service is stopped first so the copy isn't blocked by locked files.
 - Creates the **`WebJEA`** Windows service (name configurable via `ServiceName`) running `WebJEA.exe` as the gMSA (or domain/local account), set to **delayed auto-start** with **restart-on-failure** (5s/10s/30s backoff, daily reset). The **Logon as a Service** right is granted to the account directly (previously granted to the IIS `APPPOOL\` principal).
-- Grants the service account **Read** on the HTTPS certificate's private key file (when `HttpsPort` and `CertThumbprint` are set). Without this the account must be a local administrator to open the key, because the `LocalMachine\My` store is readable by everyone but the key file itself is not — see [System Requirements](System-Requirements.md#certificate-recommended).
-- Writes `appsettings.Production.json` in the site folder: the `webjea.json` path, `WebJEA:HttpPort`/`WebJEA:HttpsPort`/`WebJEA:CertThumbprint` (HTTP is automatically redirected to HTTPS once all three are set — there is no separate setting for it), and the top-level `AllowedHosts` (every configured FQDN plus the machine name and `localhost` — this replaces IIS host-header bindings; requests for other host names get HTTP 400). Because `appsettings.Production.json` is not part of the shipped site files, it survives in-place upgrades. NLog's log-file paths are written the same way as before.
+- Before changing anything, checks the certificate Kestrel will serve for `CertSubject`: private key present, in date, Server Authentication allowed, every FQDN covered, and **trusted by this server** (full chain, revocation reachable). An untrusted certificate stops the deploy unless `AllowUntrustedCert` is `true`.
+- Grants the service account **Read** on the private key file of every certificate matching `CertSubject` (when `HttpsPort` is set) — all of them, so a renewal that is already imported works on the next restart. Without this the account must be a local administrator to open the key, because the `LocalMachine\My` store is readable by everyone but the key file itself is not — see [System Requirements](System-Requirements.md#certificate-recommended).
+- Writes `appsettings.Production.json` in the site folder: the `webjea.json` path; the listeners as Kestrel's native `Kestrel:Endpoints` configuration, with the HTTPS certificate selected from `LocalMachine\My` by subject (HTTP is automatically redirected to HTTPS whenever there is an HTTPS listener — there is no separate setting for it); and the top-level `AllowedHosts` (every configured FQDN plus the machine name and `localhost` — this replaces IIS host-header bindings; requests for other host names get HTTP 400). Because `appsettings.Production.json` is not part of the shipped site files, it survives in-place upgrades. NLog's log-file paths are written the same way as before.
 - Opens a Windows Firewall inbound rule for each enabled port.
 - Verifies (and attempts to register) the Kerberos SPN for every FQDN — see [windows.md](windows.md#kerberos-requires-an-spn) — unless `-SkipSpnCheck` is passed.
 - Starts (or restarts) the service and smoke-probes every configured http/https binding through `127.0.0.1`, failing the deploy if the app doesn't answer.
@@ -35,12 +36,14 @@ PowerShell 7 does **not** need a separate install on the server — the PowerShe
 | `AppPoolUserName`, `AppPoolPassword` | `ServiceUserName`, `ServicePassword` | Same gMSA-vs-password rule: gMSA ⇒ trailing `$`, empty password; otherwise a password is required |
 | `AppPoolLoadUserProfile` | *(removed)* | Not applicable to a Windows service |
 | `DisableDefaultWebsite` | *(removed)* | No IIS site to disable |
-| *(new)* | `HttpPort`, `HttpsPort` | Port number to listen on; `0` or omitted disables that listener. At least one is required; `HttpsPort` requires `CertThumbprint` |
-| `RedirectPort80To443` | *(removed)* | HTTP is redirected to HTTPS automatically whenever `HttpPort`, `HttpsPort`, and `CertThumbprint` are all set; the redirect is no longer independently settable |
+| *(new)* | `HttpPort`, `HttpsPort` | Port number to listen on; `0` or omitted disables that listener. At least one is required; `HttpsPort` requires `CertSubject` |
+| `CertThumbprint` | `CertSubject` | Kestrel selects the certificate by subject (newest valid match wins), so renewals no longer need a settings change. A file with `CertThumbprint` is rejected; when that thumbprint is still in the store, the error names its subject to use |
+| *(new)* | `AllowUntrustedCert` | `true` permits a certificate this server does not trust (lab/self-signed). Default `false`: an untrusted certificate stops the deploy |
+| `RedirectPort80To443` | *(removed)* | HTTP is redirected to HTTPS automatically whenever both `HttpPort` and `HttpsPort` are set; the redirect is no longer independently settable |
 | `SiteFQDN`, `SecondarySiteFQDNs` | `SiteFQDNs` | One array holding every host name WebJEA answers on; there is no primary/secondary distinction (all names were already treated identically for allowed hosts, SPNs, certificate coverage and the smoke probe). A single name may also be given as a plain string. Each entry is validated as a host name — no scheme, port, path or wildcard |
 | `AppName`, `ParentSiteName` | *(removed)* | Sub-application installs are no longer supported on Windows — see below |
 
-A settings file that still contains any retired key (`SiteName`, `AppPoolName`, `AppPoolUserName`, `AppPoolPassword`, `AppPoolLoadUserProfile`, `DisableDefaultWebsite`, `AppName`, `ParentSiteName`, `SiteFQDN`, `SecondarySiteFQDNs`) is rejected outright with an error naming the offending keys — Deploy.ps1 does not attempt a partial or best-effort translation of an old file.
+A settings file that still contains any retired key (`SiteName`, `AppPoolName`, `AppPoolUserName`, `AppPoolPassword`, `AppPoolLoadUserProfile`, `DisableDefaultWebsite`, `AppName`, `ParentSiteName`, `SiteFQDN`, `SecondarySiteFQDNs`, `CertThumbprint`) is rejected outright with an error naming the offending keys — Deploy.ps1 does not attempt a partial or best-effort translation of an old file.
 
 ### Migrating an existing IIS install
 
@@ -57,4 +60,5 @@ The previous sub-application model — installing additional WebJEA instances in
 ## What no longer applies (vs. the WebForms releases)
 
 - In-place upgrade guidance: replace the `site/` contents but keep your `appsettings.Production.json` and `NLog.config`. Upgrading from a WebForms (pre-.NET 10) release is **not** an in-place upgrade — deploy fresh with Deploy.ps1 and point it at your existing scripts folder.
-- **Breaking change:** `WebJEA:HttpsPort` now also enables the HTTPS listener; it is no longer a redirect-target-only setting (see the settings schema table above).
+- **Breaking change:** the app no longer reads `WebJEA:HttpPort`, `WebJEA:HttpsPort` or `WebJEA:CertThumbprint` — listeners and the HTTPS certificate are Kestrel's native `Kestrel:Endpoints` configuration, the same mechanism containers use. WebJEA refuses to start while any of the old keys is present in its configuration. Re-running `Deploy.ps1` migrates `appsettings.Production.json` (writes `Kestrel:Endpoints`, removes the old keys); in the settings file, replace `CertThumbprint` with `CertSubject` (see the schema table above).
+- **Breaking change:** `Deploy.ps1` now refuses a certificate this server does not trust. Set `AllowUntrustedCert` to `true` for lab or self-signed certificates.

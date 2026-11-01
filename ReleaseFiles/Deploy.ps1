@@ -104,6 +104,49 @@ begin
         }
     }
 
+    function Step_AppSettingsValue([string]$SitePath, [string[]]$KeyPath, $Value, [string]$Label)
+    {
+        #Sets one value at any depth in appsettings.Production.json (e.g. AllowedHosts, or
+        #the whole Kestrel.Endpoints object), creating parent objects as needed and leaving
+        #sibling keys alone - an admin's Kestrel.Limits survives an Endpoints update. Current
+        #and desired values are compared as compressed JSON so an object is checked as a
+        #whole; callers pass [ordered] hashtables so the key order matches what is read back.
+        $desired = ConvertTo-Json -InputObject $Value -Depth 10 -Compress
+        @{
+            Description = "appsettings.Production.json: $Label"
+            TestScript  = {
+                $path = "$SitePath\appsettings.Production.json"
+                if (-not (Test-Path $path)) { return $false }
+                try { $node = Get-Content -Path $path -Raw | ConvertFrom-Json } catch { return $false }
+                foreach ($key in $KeyPath)
+                {
+                    if ($null -eq $node -or -not $node.PSObject.Properties[$key]) { return $false }
+                    $node = $node.$key
+                }
+                return ((ConvertTo-Json -InputObject $node -Depth 10 -Compress) -eq $desired)
+            }.GetNewClosure()
+            SetScript   = {
+                $path = "$SitePath\appsettings.Production.json"
+                $json = if (Test-Path $path) { Get-Content -Path $path -Raw | ConvertFrom-Json }
+                else { [pscustomobject]@{} }
+                $parent = $json
+                for ($i = 0; $i -lt $KeyPath.Count - 1; $i++)
+                {
+                    $key = $KeyPath[$i]
+                    if (-not ($parent.PSObject.Properties[$key] -and $parent.$key -is [pscustomobject]))
+                    {
+                        $parent | Add-Member -NotePropertyName $key -NotePropertyValue ([pscustomobject]@{}) -Force
+                    }
+                    $parent = $parent.$key
+                }
+                #Stored through a JSON round-trip so it has the same shape (pscustomobject,
+                #not hashtable) the TestScript reads back.
+                $parent | Add-Member -NotePropertyName $KeyPath[-1] -NotePropertyValue ($desired | ConvertFrom-Json) -Force
+                $json | ConvertTo-Json -Depth 10 | Set-Content -Path $path -Encoding UTF8
+            }.GetNewClosure()
+        }
+    }
+
     function Step_XmlAttribute([string]$Path, [string]$XPath, [string]$Name, [string]$Value, [string]$Label)
     {
         #Sets one attribute on one element. NLog.config declares a DEFAULT namespace
@@ -293,39 +336,60 @@ begin
         Step_AppSettingsProperty -SitePath $settings.SitePath -Section 'WebJEA' -Name 'ConfigFile' `
             -Value "$($settings.ScriptsPath)\webjea.json"
 
-        #Kestrel listeners: the app reads these at startup (0 disables a listener).
-        #[int]$null is 0, so a missing/null port key disables that listener.
-        Step_AppSettingsProperty -SitePath $settings.SitePath -Section 'WebJEA' -Name 'HttpPort' `
-            -Value ([int]$settings.HttpPort)
-        Step_AppSettingsProperty -SitePath $settings.SitePath -Section 'WebJEA' -Name 'HttpsPort' `
-            -Value ([int]$settings.HttpsPort)
-        Step_AppSettingsProperty -SitePath $settings.SitePath -Section 'WebJEA' -Name 'CertThumbprint' `
-            -Value ([string]$settings.CertThumbprint)
+        #Kestrel listeners use Kestrel's native endpoint configuration. A disabled listener
+        #([int]$null is 0, so a missing/null port key disables it) is simply absent. The
+        #certificate is selected by Kestrel at startup from LocalMachine\My by subject (the
+        #newest matching, valid one), so a renewal needs no settings change.
+        #'*' listens on every IPv4 and IPv6 address.
+        $endpoints = [ordered]@{}
+        if ([int]$settings.HttpPort -gt 0)
+        {
+            $endpoints.Http = [ordered]@{ Url = "http://*:$([int]$settings.HttpPort)" }
+        }
+        if ([int]$settings.HttpsPort -gt 0)
+        {
+            $endpoints.Https = [ordered]@{
+                Url         = "https://*:$([int]$settings.HttpsPort)"
+                Certificate = [ordered]@{
+                    Subject      = [string]$settings.CertSubject
+                    Store        = 'My'
+                    Location     = 'LocalMachine'
+                    AllowInvalid = [bool]$settings.AllowUntrustedCert
+                }
+            }
+        }
+        $endpointLabel = @($endpoints.Keys | ForEach-Object { $endpoints[$_].Url }) -join ', '
+        if ($endpoints.Contains('Https')) { $endpointLabel += " (certificate subject '$($settings.CertSubject)')" }
+        Step_AppSettingsValue -SitePath $settings.SitePath -KeyPath 'Kestrel', 'Endpoints' -Value $endpoints `
+            -Label "Kestrel.Endpoints = $endpointLabel"
+
+        #Earlier alphas configured the listeners through these WebJEA keys. The app now
+        #refuses to start while any of them is present, so an upgrade removes them.
+        $sitePath = $settings.SitePath
+        $legacyKeys = @('HttpPort', 'HttpsPort', 'CertThumbprint')
+        @{
+            Description = 'appsettings.Production.json: retired WebJEA.HttpPort/HttpsPort/CertThumbprint removed'
+            TestScript  = {
+                $path = "$sitePath\appsettings.Production.json"
+                if (-not (Test-Path $path)) { return $true }
+                try { $json = Get-Content -Path $path -Raw | ConvertFrom-Json } catch { return $false }
+                if ($null -eq $json.WebJEA) { return $true }
+                return -not ($legacyKeys | Where-Object { $json.WebJEA.PSObject.Properties[$_] })
+            }.GetNewClosure()
+            SetScript   = {
+                $path = "$sitePath\appsettings.Production.json"
+                $json = Get-Content -Path $path -Raw | ConvertFrom-Json
+                foreach ($key in $legacyKeys) { $json.WebJEA.PSObject.Properties.Remove($key) }
+                $json | ConvertTo-Json -Depth 10 | Set-Content -Path $path -Encoding UTF8
+            }.GetNewClosure()
+        }
 
         #Host filtering replaces IIS host-header bindings: requests for names not in this
         #list get 400. localhost + machine name keep the smoke probe and local
         #troubleshooting working. AllowedHosts is a TOP-LEVEL key, not under WebJEA.
         $allowedHosts = (@($settings.SiteFQDNs) + @($env:COMPUTERNAME, 'localhost') | Select-Object -Unique) -join ';'
-        @{
-            Description = "appsettings.Production.json: AllowedHosts = $allowedHosts"
-            TestScript  = {
-                $path = "$($settings.SitePath)\appsettings.Production.json"
-                if (-not (Test-Path $path)) { return $false }
-                try { $json = Get-Content -Path $path -Raw | ConvertFrom-Json } catch { return $false }
-                return ($json.AllowedHosts -eq $allowedHosts)
-            }.GetNewClosure()
-            SetScript   = {
-                $path = "$($settings.SitePath)\appsettings.Production.json"
-                $json = if (Test-Path $path) { Get-Content -Path $path -Raw | ConvertFrom-Json }
-                else { [pscustomobject]@{} }
-                if (-not $json.PSObject.Properties['AllowedHosts'])
-                {
-                    $json | Add-Member -NotePropertyName 'AllowedHosts' -NotePropertyValue $null
-                }
-                $json.AllowedHosts = $allowedHosts
-                $json | ConvertTo-Json -Depth 10 | Set-Content -Path $path -Encoding UTF8
-            }.GetNewClosure()
-        }
+        Step_AppSettingsValue -SitePath $settings.SitePath -KeyPath 'AllowedHosts' -Value $allowedHosts `
+            -Label "AllowedHosts = $allowedHosts"
 
         #set nlog log location in nlog.config in the site folder
         Step_XmlAttribute -Path "$($settings.SitePath)\nlog.config" `
@@ -411,11 +475,15 @@ begin
         #ACL'd to SYSTEM and local Administrators only. That single ACL is the reason a
         #WebJEA service account would otherwise have to be a local administrator - without
         #it Kestrel cannot open the key and the HTTPS listener fails at startup. Grant the
-        #account plain Read on that one file instead. Checked on every deploy because
-        #renewing a certificate produces a NEW key file with the default permissions again.
-        if ([int]$settings.HttpsPort -gt 0 -and $settings.CertThumbprint)
+        #account plain Read on that file instead. Checked on every deploy because renewing a
+        #certificate produces a NEW key file with the default permissions again.
+        #Kestrel picks the certificate itself at startup (newest valid match for CertSubject),
+        #so grant on EVERY certificate whose subject matches (ValidateSettings collected them
+        #as CertMatches): a renewal that is already imported then works on the next restart.
+        foreach ($matchedCert in @($settings.CertMatches))
         {
-            $thumbprint = $settings.CertThumbprint
+            $thumbprint = $matchedCert.Thumbprint
+            $certLabel = "$thumbprint ('$($matchedCert.Subject)', expires $($matchedCert.NotAfter.ToString('yyyy-MM-dd')))"
 
             #GetNewClosure() rebinds these scriptblocks to a new dynamic module whose scope
             #chain reaches the global scope but NOT this script's, so the two helpers below
@@ -426,7 +494,7 @@ begin
             $getKeyPath = ${function:GetCertPrivateKeyPath}
             $getAccountSid = ${function:ResolveAccountSid}
             @{
-                Description = "$account can read the private key of certificate $thumbprint"
+                Description = "$account can read the private key of certificate $certLabel"
                 TestScript  = {
                     $cert = Get-Item -Path "Cert:\LocalMachine\My\$thumbprint" -ErrorAction SilentlyContinue
                     if (-not $cert) { return $false }
@@ -589,8 +657,8 @@ begin
             }
         }
 
-        #appsettings.Production.json (config location, ports, cert, redirect, allowed
-        #hosts) and nlog paths
+        #appsettings.Production.json (config location, Kestrel endpoints + certificate,
+        #allowed hosts) and nlog paths
         GetSteps_AppConfig -Settings $Settings
     }
     function GetSteps_WebJEA($Settings)
@@ -784,6 +852,21 @@ begin
         return $null
     }
 
+    function GetCertChainErrors([System.Security.Cryptography.X509Certificates.X509Certificate2]$Cert)
+    {
+        #The same test Kestrel applies when AllowInvalid is false (X509Certificate2Collection.
+        #Find with validOnly): build the chain against this machine's trust store with
+        #online revocation checking. Returns one line per chain problem; empty = trusted.
+        $chain = New-Object System.Security.Cryptography.X509Certificates.X509Chain
+        try
+        {
+            $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::Online
+            if ($chain.Build($Cert)) { return @() }
+            return @($chain.ChainStatus | ForEach-Object { "$($_.Status): $($_.StatusInformation.Trim())" })
+        }
+        finally { $chain.Dispose() }
+    }
+
     function ValidateSettings( [psobject]$Settings )
     {
         #quick helper function
@@ -798,6 +881,21 @@ begin
             'installs are no longer supported on Windows (use containers - see docs/docker.md). ' +
             'Start from the new settings.template.json: ServiceName/ServiceUserName replace the site/app-pool keys. ' +
             'See docs/deployment-migration.md.')
+
+        #Kestrel's native certificate configuration selects by subject and has no thumbprint
+        #option. Point at the replacement, quoting the old certificate's name when it can be
+        #found so the fix is copy-paste.
+        if ($Settings.PSObject.Properties['CertThumbprint'])
+        {
+            $hint = ''
+            if ($Settings.CertThumbprint -match '^[0-9A-Fa-f]{40}$')
+            {
+                $oldCert = Get-Item -Path "Cert:\LocalMachine\My\$($Settings.CertThumbprint)" -ErrorAction SilentlyContinue
+                if ($oldCert) { $hint = " That certificate's subject name is '$($oldCert.GetNameInfo('SimpleName', $false))' - use that as CertSubject." }
+            }
+            throw ("Settings file contains the retired key CertThumbprint. The HTTPS certificate is now selected by Kestrel " +
+                "by subject: replace CertThumbprint with CertSubject.$hint See docs/deployment-migration.md.")
+        }
 
         #Remove trailing slashes from paths to avoid problems later
         $settings.SitePath = $settings.SitePath.TrimEnd('\')
@@ -844,7 +942,9 @@ begin
         $httpPort = [int]$settings.HttpPort
         $httpsPort = [int]$settings.HttpsPort
         Assert ($httpPort -gt 0 -or $httpsPort -gt 0) 'At least one of HttpPort or HttpsPort must be set to a port number.'
-        Assert (-not ($httpsPort -gt 0 -and -not $settings.CertThumbprint)) 'HttpsPort is enabled but CertThumbprint is not provided.'
+        Assert (-not ($httpsPort -gt 0 -and [string]::IsNullOrWhiteSpace($settings.CertSubject))) 'HttpsPort is enabled but CertSubject is not provided.'
+        #[bool]'false' is $true, so a quoted value would silently allow untrusted certificates.
+        Assert ($null -eq $settings.AllowUntrustedCert -or $settings.AllowUntrustedCert -is [bool]) "AllowUntrustedCert must be true or false (unquoted), not '$($settings.AllowUntrustedCert)'."
 
         #paths must differ (unchanged)
         Assert ($settings.SitePath -ne $settings.ScriptsPath) 'SitePath and ScriptsPath cannot be the same. Please update the settings file to specify different paths.'
@@ -867,23 +967,103 @@ begin
         Assert ($allFQDNs.Count -gt 0) 'SiteFQDNs must list at least one host name WebJEA answers on.'
         $Settings | Add-Member -NotePropertyName SiteFQDNs -NotePropertyValue $allFQDNs -Force
 
-        #Certificate checks (unchanged from the current file: thumbprint exists in
-        #LocalMachine\My and every FQDN is covered by subject/SAN or wildcard SAN)
-        if ($settings.CertThumbprint -and $httpsPort -gt 0)
+        #Certificate checks. Kestrel selects the certificate itself at startup
+        #(Kestrel:Endpoints:Https:Certificate): subject contains CertSubject, Server
+        #Authentication EKU (or none), private key, trusted and in date unless AllowInvalid,
+        #newest NotAfter wins. Deploy doesn't host anything; it checks here - before the
+        #service is stopped - that the certificate Kestrel will pick is one that should serve
+        #HTTPS, and collects every match for the private-key ACL step.
+        $certMatches = @()
+        if ($httpsPort -gt 0)
         {
-            $cert = Get-ChildItem -Path cert:\LocalMachine\My\$($settings.CertThumbprint) -ErrorAction SilentlyContinue
-            Assert ($cert) "CertThumbprint '$($settings.CertThumbprint)' not found in LocalMachine\My store."
-            #A public-key-only certificate imports and validates cleanly here but cannot
-            #complete a TLS handshake, and there is no key for the private-key ACL step to
-            #grant. Catch it now instead of at first service start.
-            Assert ($cert.HasPrivateKey) "Certificate '$($settings.CertThumbprint)' is in LocalMachine\My but has no private key, so it cannot serve HTTPS. Re-import it from a PFX that includes the private key."
+            $subject = $settings.CertSubject.Trim()
+            $settings.CertSubject = $subject #written to Kestrel:Endpoints as-is
+            $allowUntrusted = [bool]$settings.AllowUntrustedCert
+            $now = Get-Date
+
+            #IndexOf, not -like: a wildcard certificate's subject contains '*', which -like
+            #would treat as a pattern. Case-insensitive substring is what Kestrel's
+            #FindBySubjectName does. A public-key-only certificate cannot complete a TLS
+            #handshake (and has no key to ACL), so it is never a match.
+            $certMatches = @(Get-ChildItem -Path Cert:\LocalMachine\My |
+                    Where-Object { $_.HasPrivateKey -and $_.Subject.IndexOf($subject, [StringComparison]::OrdinalIgnoreCase) -ge 0 } |
+                    Sort-Object -Property NotAfter -Descending)
+            Assert ($certMatches.Count -gt 0) ("No certificate with a private key in LocalMachine\My has a subject containing '$subject'. " +
+                'CertSubject is matched against the certificate subject (e.g. CN=webjea.example.com), not its SANs. ' +
+                'Import the certificate from a PFX that includes the private key, or correct CertSubject.')
+
+            $subjects = @($certMatches | ForEach-Object { $_.Subject } | Select-Object -Unique)
+            if ($subjects.Count -gt 1)
+            {
+                Write-Warning "CertSubject '$subject' matches certificates with different subjects ($($subjects -join ' | ')). Kestrel serves the newest valid one among them - use a more specific CertSubject if that is not intended."
+            }
+
+            #Walk newest-first, rejecting what Kestrel would skip; the first survivor is the
+            #certificate it will serve. With AllowUntrustedCert Kestrel skips only on EKU, so
+            #the newest EKU-capable match is its pick even if out of date - checked below.
+            $serverAuthOid = '1.3.6.1.5.5.7.3.1'
+            $cert = $null
+            $rejected = @()
+            $untrustedSeen = $false
+            foreach ($candidate in $certMatches)
+            {
+                $reasons = @()
+                $eku = $candidate.Extensions | Where-Object { $_ -is [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension] }
+                if ($eku -and -not ($eku.EnhancedKeyUsages | Where-Object { $_.Value -eq $serverAuthOid }))
+                {
+                    $reasons += 'no Server Authentication enhanced key usage'
+                }
+                elseif (-not $allowUntrusted)
+                {
+                    if ($candidate.NotBefore -gt $now) { $reasons += "not valid until $($candidate.NotBefore)" }
+                    elseif ($candidate.NotAfter -lt $now) { $reasons += "expired $($candidate.NotAfter)" }
+                    else
+                    {
+                        $chainErrors = @(GetCertChainErrors -Cert $candidate)
+                        if ($chainErrors.Count -gt 0)
+                        {
+                            $reasons += "not trusted by this server ($($chainErrors -join '; '))"
+                            $untrustedSeen = $true
+                        }
+                    }
+                }
+                if ($reasons.Count -eq 0) { $cert = $candidate; break }
+                $rejected += "$($candidate.Thumbprint) '$($candidate.Subject)' (expires $($candidate.NotAfter.ToString('yyyy-MM-dd'))): $($reasons -join ', ')"
+            }
+            if (-not $cert)
+            {
+                $message = "No certificate matching CertSubject '$subject' can serve HTTPS:`n  " + ($rejected -join "`n  ")
+                if ($untrustedSeen)
+                {
+                    $message += "`nInstall the issuing CA chain on this server (and make its revocation list reachable), or, if an untrusted certificate is intentional (lab or self-signed), set AllowUntrustedCert to true in the settings file."
+                }
+                throw $message
+            }
+
+            $certLabel = "Certificate $($cert.Thumbprint) '$($cert.Subject)' (issued by '$($cert.Issuer)', expires $($cert.NotAfter.ToString('yyyy-MM-dd')))"
+            if ($allowUntrusted)
+            {
+                Assert ($cert.NotBefore -le $now -and $cert.NotAfter -ge $now) ("$certLabel is the newest match for CertSubject, which Kestrel serves when " +
+                    "AllowUntrustedCert is true, but it is outside its validity period ($($cert.NotBefore) to $($cert.NotAfter)). Remove it from LocalMachine\My or import a current certificate.")
+                $chainErrors = @(GetCertChainErrors -Cert $cert)
+                if ($chainErrors.Count -gt 0)
+                {
+                    Write-Warning "$certLabel is not trusted by this server ($($chainErrors -join '; ')). Proceeding because AllowUntrustedCert is true - browsers will show a certificate warning."
+                }
+            }
+            $daysLeft = [int][Math]::Floor(($cert.NotAfter - $now).TotalDays)
+            if ($daysLeft -lt 30) { Write-Warning "$certLabel expires in $daysLeft day(s)." }
+
             $certNames = @($cert.DnsNameList.Unicode)
             foreach ($fqdn in $allFQDNs)
             {
                 $wildcardName = if ($fqdn.Contains('.')) { '*.' + $fqdn.Split('.', 2)[1] } else { $null }
-                Assert ($certNames -contains $fqdn -or ($wildcardName -and $certNames -contains $wildcardName)) "Host name '$fqdn' is not covered by the certificate with thumbprint '$($settings.CertThumbprint)' (certificate names: $($certNames -join ', '))."
+                Assert ($certNames -contains $fqdn -or ($wildcardName -and $certNames -contains $wildcardName)) "Host name '$fqdn' is not covered by $certLabel (certificate names: $($certNames -join ', '))."
             }
         }
+        #Every match, not just the one Kestrel serves today: the private-key ACL step grants
+        #on all of them so an already-imported renewal works on the next restart.
+        $Settings | Add-Member -NotePropertyName CertMatches -NotePropertyValue $certMatches -Force
     }
 
     function InvokeStep([psobject]$Step, [switch]$TestOnly)
@@ -984,19 +1164,20 @@ process
     }
     ValidateSettings -Settings $Settings
 
-    #HTTP->HTTPS redirect is automatic (HttpPort + HttpsPort + CertThumbprint all set) -
-    #there is no separate opt-in setting. If HttpPort is enabled but the other two
-    #aren't both set, HTTP is served directly with NO redirect to HTTPS; that's a valid
-    #HTTP-only install, but it's also an easy accident, so require an explicit opt-in.
+    #HTTP->HTTPS redirect is automatic whenever an HTTPS listener exists (the app's
+    #redirect middleware discovers its port) - there is no separate opt-in setting. If
+    #HttpPort is enabled without HttpsPort, HTTP is served directly with NO redirect to
+    #HTTPS; that's a valid HTTP-only install, but it's also an easy accident, so require an
+    #explicit opt-in. (ValidateSettings already requires CertSubject whenever HttpsPort is set.)
     if (-not $AllowHttpWithoutRedirect)
     {
         $httpEnabled = [int]$Settings.HttpPort -gt 0
-        $wouldRedirect = ([int]$Settings.HttpsPort -gt 0) -and $Settings.CertThumbprint
+        $wouldRedirect = [int]$Settings.HttpsPort -gt 0
         if ($httpEnabled -and -not $wouldRedirect)
         {
             throw @"
-HttpPort is enabled ($($Settings.HttpPort)) but HttpsPort and CertThumbprint are not both set, so HTTP requests will be served directly with no redirect to HTTPS.
-HTTP is only ever redirected to HTTPS automatically, when HttpPort, HttpsPort, and CertThumbprint are all configured - there is no separate redirect setting.
+HttpPort is enabled ($($Settings.HttpPort)) but HttpsPort is not, so HTTP requests will be served directly with no redirect to HTTPS.
+HTTP is redirected to HTTPS automatically whenever both HttpPort and HttpsPort (with CertSubject) are configured - there is no separate redirect setting.
 If an HTTP-only install is intentional, re-run with -AllowHttpWithoutRedirect to proceed.
 "@
         }
