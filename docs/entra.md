@@ -99,7 +99,7 @@ Useful for a handful of users without creating a group.
 
 ## Configure WebJEA
 
-Put the values from the [app registration](entra-appreg.md#what-youll-collect) in `appsettings.Production.json` in the site folder:
+Put the values from the [app registration](entra-appreg.md#what-youll-collect) in `appsettings.Production.json` in the site folder. With a **certificate** ([Option A](entra-appreg.md#option-a-certificate-recommended), recommended):
 
 ```json
 {
@@ -108,16 +108,39 @@ Put the values from the [app registration](entra-appreg.md#what-youll-collect) i
     "Instance": "https://login.microsoftonline.com/",
     "TenantId": "<tenant-guid>",
     "ClientId": "<app-registration-client-id>",
-    "ClientSecret": "<client-secret-value>"
+    "ClientCredentials": [
+      {
+        "SourceType": "StoreWithDistinguishedName",
+        "CertificateStorePath": "LocalMachine/My",
+        "CertificateDistinguishedName": "CN=WebJEA-Graph"
+      }
+    ]
   }
 }
 ```
 
-- `EnableGraph`: `true` (the default) lets WebJEA look up the groups of users in more than 200 groups ([Group overage](#group-overage-users-in-more-than-200-groups)) and resolve [group display names](#group-display-names). It needs the client secret and the Graph permission from [App registration Steps 4–5](entra-appreg.md#step-4-create-a-client-secret). Set it to `false` only if you have no client secret; group display names and overage handling then stop working.
+With a **client secret** ([Option B](entra-appreg.md#option-b-client-secret)), replace `ClientCredentials` with:
+
+```json
+    "ClientSecret": "<client-secret-value>"
+```
+
+`ClientCredentials` is Microsoft.Identity.Web's standard credential list, so other certificate sources work too:
+
+| `SourceType` | Other keys | Use |
+|---|---|---|
+| `StoreWithDistinguishedName` | `CertificateStorePath`, `CertificateDistinguishedName` (exact subject, e.g. `CN=WebJEA-Graph`) | Windows service. The newest valid matching certificate is used, so renewals need no config change. |
+| `StoreWithThumbprint` | `CertificateStorePath`, `CertificateThumbprint` | Windows, pinned to one certificate. Update it on every renewal. |
+| `Path` | `CertificateDiskPath`, `CertificatePassword` | Docker: a `.pfx` file mounted read-only ([Docker](docker.md#entra-id-app-registration-setup)). |
+| `Base64Encoded` | `Base64EncodedValue` (the whole `.pfx`, Base64), `CertificatePassword` | Docker or a secret store that injects environment variables. |
+
+WebJEA logs which credential it found at startup (`Entra: Graph client credential = certificate (StoreWithDistinguishedName)`), and warns if `EnableGraph` is on but none is configured.
+
+- `EnableGraph`: `true` (the default) lets WebJEA look up the groups of users in more than 200 groups ([Group overage](#group-overage-users-in-more-than-200-groups)) and resolve [group display names](#group-display-names). It needs a client credential and the Graph permission from [App registration Steps 4–5](entra-appreg.md#step-4-add-a-client-credential). Set it to `false` only if you have no client credential; group display names and overage handling then stop working.
 - `ResolveGroupNamesViaGraph`: `true` (the default) allows [group display names](#group-display-names) in `PermittedGroups`. Object IDs, UPNs and `*` are never looked up. Set it to `false` if you don't use display names.
 - `AppRolePrefix`: entries starting with this prefix (case-insensitive) are treated as [app role](entra-advanced.md#app-roles) values and never looked up in Graph. There is no default. We recommend `WebJEA.`, with every app role value named to match (`WebJEA.HR`, `WebJEA.Admin`). **Groups can't use the prefix:** a group whose display name starts with it can only be referenced by object ID.
 
-Any of these can also be set as environment variables using `__` separators (e.g. `AzureAd__ClientSecret`), which is how the [Docker images](docker.md) are configured. Keep `ClientSecret` out of version control.
+Any of these can also be set as environment variables using `__` separators, which is how the [Docker images](docker.md) are configured. `ClientCredentials` entries are numbered from `0` (e.g. `AzureAd__ClientCredentials__0__SourceType=Path`), and a secret is `AzureAd__ClientSecret`. Keep client secrets, PFX files and PFX passwords out of version control.
 
 The `AzureAd` section name comes from Microsoft.Identity.Web, the library WebJEA uses for sign-in, and matches Microsoft's own documentation and samples.
 
@@ -146,8 +169,12 @@ Entra errors are written to the WebJEA log. Most authorization problems show up 
 | `AADSTS65001: The user or administrator has not consented to use the application`, followed by `IDW10502: An MsalUiRequiredException was thrown` and `GraphGroupLoader: ... failed` | `GroupMember.Read.All` has not been granted admin consent. | Grant admin consent ([Step 5](entra-appreg.md#step-5-grant-microsoft-graph-permission)), then have affected users sign out and back in. |
 | `AADSTS700054: response_type 'id_token' is not enabled` | ID tokens not enabled on the app registration. | [Step 2](entra-appreg.md#step-2-enable-id-tokens). |
 | `AADSTS50011: The redirect URI ... does not match` | The URL users browse to (or the proxy's external URL) isn't registered. | Add `https://<host>/signin-oidc` under **Authentication** ([Step 1](entra-appreg.md#step-1-create-the-app-registration)). |
-| `AADSTS7000215: Invalid client secret` | Wrong value copied (Secret ID instead of Value) or the secret expired. | Create a new secret and copy the **Value** column ([Step 4](entra-appreg.md#step-4-create-a-client-secret)). |
-| `EntraUserContext: group overage detected ... EnableGraph is false` | Graph is turned off, so the token can carry only a limited number of groups. A user in more than ~200 groups gets no `groups` claim. With Graph off, sign-in can also fall back to the implicit flow, where Entra sends a `hasgroups` marker instead of the groups once a user is in more than **5** groups. | Set `EnableGraph: true` (the default) and complete [App registration Steps 4–5](entra-appreg.md#step-4-create-a-client-secret) (client secret and Graph permission), then have affected users sign out and back in. |
+| `AADSTS7000215: Invalid client secret` | Wrong value copied (Secret ID instead of Value) or the secret expired. | Create a new secret and copy the **Value** column ([Step 4, Option B](entra-appreg.md#option-b-client-secret)). |
+| `Entra: Authentication:Entra:EnableGraph is true but no client credential is configured` (at startup) | Neither `AzureAd:ClientCredentials` nor `AzureAd:ClientSecret` is set (or the environment variables didn't reach the app). | Configure a credential ([Configure WebJEA](#configure-webjea)), or set `EnableGraph: false` if you can't. |
+| `IDW10109: All client certificates passed to the configuration have expired or can't be loaded` | No valid certificate matched: wrong `CertificateDistinguishedName`/thumbprint or store, the certificate expired, or the PFX path or password is wrong. The full message lists the reason for each certificate. | Check the subject matches exactly (`CN=WebJEA-Graph`) and the certificate is in `LocalMachine\My` and not expired. In Docker, check the mount and `CertificatePassword`. |
+| `Keyset does not exist` / `CryptographicException` while loading the certificate | The service account can't read the certificate's private key. Common after a renewal, because the new key file has default permissions. | Grant the service account **Read** on the private key ([Step 4, Option A](entra-appreg.md#option-a-certificate-recommended), step 3). In Docker, make the PFX readable by the container's `app` user. |
+| `AADSTS700027: The certificate with identifier used to sign the client assertion is not registered on application` | The certificate WebJEA loaded isn't uploaded to the app registration, e.g. a renewed certificate whose `.cer` wasn't uploaded. | Upload the `.cer` under **Certificates & secrets** → **Certificates** ([Step 4, Option A](entra-appreg.md#option-a-certificate-recommended)). |
+| `EntraUserContext: group overage detected ... EnableGraph is false` | Graph is turned off, so the token can carry only a limited number of groups. A user in more than ~200 groups gets no `groups` claim. With Graph off, sign-in can also fall back to the implicit flow, where Entra sends a `hasgroups` marker instead of the groups once a user is in more than **5** groups. | Set `EnableGraph: true` (the default) and complete [App registration Steps 4–5](entra-appreg.md#step-4-add-a-client-credential) (client credential and Graph permission), then have affected users sign out and back in. |
 | `EntraGroupResolver: '<entry>' is not a GUID; matching it as an app role value or UPN.` (Trace) | Informational. If `<entry>` was meant to be a group, it didn't resolve. | Use the group's object ID. Windows-style entries never match; see [Switching from Windows mode](#switching-from-windows-mode). |
 | Menu is empty, no errors | The user's token has none of the `PermittedGroups` entries. | Check that the groups claim is configured ([Step 3](entra-appreg.md#step-3-add-the-groups-claim)) and that the user signed in again after the change. With [advanced options](entra-advanced.md), also check assignments on the enterprise application and that the user is a **direct** member of any assigned group. |
 

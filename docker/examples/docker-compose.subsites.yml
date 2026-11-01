@@ -8,6 +8,10 @@
 # its own Entra app registration (so each can carry different Graph permissions and
 # each redirect URI is https://host/<prefix>/signin-oidc).
 #
+# Each instance authenticates to Graph with a client secret here. For a certificate,
+# replace its ClientSecret line with AzureAd__ClientCredentials__0__* settings and a
+# read-only ./<instance>/certs mount (see docs/docker.md).
+#
 # Scaling: to run N replicas of one instance, add `deploy: { replicas: N }` under that
 # service (Swarm) or `docker compose up --scale webjea-hr=3`. Session state is
 # in-memory per container, so the nginx upstreams below use ip_hash (sticky sessions)

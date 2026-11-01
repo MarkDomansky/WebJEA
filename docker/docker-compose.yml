@@ -20,7 +20,13 @@ services:
       Authentication__Mode: Entra
       AzureAd__TenantId: "<tenant-guid>"
       AzureAd__ClientId: "<client-id>"
+      # Graph client credential: a client secret, or (recommended) a certificate.
+      # For a certificate, replace ClientSecret with the three lines below and
+      # mount ./certs (see docs/docker.md).
       AzureAd__ClientSecret: "<client-secret>"
+      # AzureAd__ClientCredentials__0__SourceType: Path
+      # AzureAd__ClientCredentials__0__CertificateDiskPath: /certs/graph.pfx
+      # AzureAd__ClientCredentials__0__CertificatePassword: "<pfx-password>"
       # Enable only when the container itself terminates TLS (see docs/docker.md);
       # with a TLS-terminating reverse proxy in front, leave these off. Listeners and
       # the certificate are standard Kestrel settings; with an https URL bound, plain
@@ -32,4 +38,5 @@ services:
       - ./scripts:/webjea/scripts
       - ./logs:/webjea/logs
       # - ./certs:/https:ro   # only needed for the direct-TLS example above
+      # - ./certs:/certs:ro   # only needed for the Graph certificate above
     restart: unless-stopped
