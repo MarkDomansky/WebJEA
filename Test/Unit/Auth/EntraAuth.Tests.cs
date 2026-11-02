@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Identity.Client;
 using WebJEA;
 using WebJEA.Auth;
 using WebJEA.Auth.Entra;
@@ -282,6 +283,115 @@ public class EntraGroupResolverTests
 
         BuildResolverWithLoader(loader).GetSID(name);
         Assert.Equal(new[] { name }, loader.Lookups);
+    }
+
+    [Theory]
+    [InlineData(@".\Administrators")]
+    [InlineData(@"CONTOSO\HR Admins")]
+    [InlineData(@"BUILTIN\Administrators")]
+    public void WindowsStyle_SkipsGraphLookup(string entry)
+    {
+        var loader = new CountingGraphGroupLoader();
+
+        Assert.Equal(entry.ToLowerInvariant(), BuildResolverWithLoader(loader).GetSID(entry));
+        Assert.Empty(loader.Lookups);
+    }
+}
+
+// Uses GraphGroupLoader's process-wide consent warning flag; xUnit runs a class's tests sequentially,
+// and no other test class calls the base Graph lookup methods that set it
+public class GraphGroupLoaderConsentTests
+{
+    private static Exception ConsentException()
+    {
+        return new MsalUiRequiredException("invalid_grant",
+            "AADSTS65001: The user or administrator has not consented to use the application.");
+    }
+
+    private class ScriptedGraphGroupLoader : GraphGroupLoader
+    {
+        private readonly Exception _failWith;
+
+        public int Queries { get; private set; }
+
+        public ScriptedGraphGroupLoader(Exception failWith = null) : base(null)
+        {
+            _failWith = failWith;
+        }
+
+        protected override string QueryGroupIdByDisplayName(string displayName)
+        {
+            Queries++;
+            if (_failWith != null) throw _failWith;
+            return "dddddddd-1111-2222-3333-444444444444";
+        }
+
+        protected override List<string> QueryTransitiveGroupIds()
+        {
+            Queries++;
+            if (_failWith != null) throw _failWith;
+            return new List<string> { "dddddddd-1111-2222-3333-444444444444" };
+        }
+    }
+
+    public GraphGroupLoaderConsentTests()
+    {
+        GraphGroupLoader.ResetConsentWarning();
+    }
+
+    [Fact]
+    public void IsConsentRequired_MatchesDirectAndWrappedConsentFailures()
+    {
+        Assert.True(GraphGroupLoader.IsConsentRequired(ConsentException()));
+        Assert.True(GraphGroupLoader.IsConsentRequired(
+            new InvalidOperationException("IDW10502: An MsalUiRequiredException was thrown", ConsentException())));
+        Assert.False(GraphGroupLoader.IsConsentRequired(new InvalidOperationException("network down")));
+    }
+
+    [Fact]
+    public void ConsentFailure_WarnsAndSkipsRestOfRequest()
+    {
+        var loader = new ScriptedGraphGroupLoader(ConsentException());
+
+        Assert.Equal("", loader.FindGroupIdByDisplayName("My Admins"));
+        Assert.True(GraphGroupLoader.ConsentWarningLogged);
+
+        Assert.Equal("", loader.FindGroupIdByDisplayName("HR Admins"));
+        Assert.Empty(loader.GetTransitiveGroupIds());
+        Assert.Equal(1, loader.Queries);
+    }
+
+    [Fact]
+    public void ConsentFailure_DoesNotCarryOverToNextRequest()
+    {
+        new ScriptedGraphGroupLoader(ConsentException()).FindGroupIdByDisplayName("My Admins");
+
+        var next = new ScriptedGraphGroupLoader(ConsentException());
+        next.FindGroupIdByDisplayName("My Admins");
+
+        Assert.Equal(1, next.Queries);
+    }
+
+    [Fact]
+    public void Success_ClearsConsentWarning()
+    {
+        new ScriptedGraphGroupLoader(ConsentException()).FindGroupIdByDisplayName("My Admins");
+        Assert.True(GraphGroupLoader.ConsentWarningLogged);
+
+        Assert.Equal("dddddddd-1111-2222-3333-444444444444",
+            new ScriptedGraphGroupLoader().FindGroupIdByDisplayName("My Admins"));
+        Assert.False(GraphGroupLoader.ConsentWarningLogged);
+    }
+
+    [Fact]
+    public void OtherFailure_NeitherWarnsNorShortCircuits()
+    {
+        var loader = new ScriptedGraphGroupLoader(new InvalidOperationException("network down"));
+
+        Assert.Equal("", loader.FindGroupIdByDisplayName("My Admins"));
+        Assert.Equal("", loader.FindGroupIdByDisplayName("HR Admins"));
+        Assert.False(GraphGroupLoader.ConsentWarningLogged);
+        Assert.Equal(2, loader.Queries);
     }
 }
 
