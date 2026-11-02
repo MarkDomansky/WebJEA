@@ -30,10 +30,18 @@
         if (el) el.textContent = text;
     }
 
-    function fetchJson(url) {
-        return fetch(url).then(function (response) {
-            if (!response.ok) throw new Error('Request failed: ' + response.status);
-            return response.json();
+    function api() {
+        return global.webjeaApi;
+    }
+
+    function reloadPage() {
+        global.location.reload();
+    }
+
+    function requestMenu() {
+        return api().request('api/menu').then(function (menu) {
+            if (!Array.isArray(menu)) throw new (api().ApiError)('server', 200, 'Unexpected menu response');
+            return menu;
         });
     }
 
@@ -45,23 +53,26 @@
         setText('lblTitle', cfg.title || '');
         setText('lblTitleDesktop', cfg.title || '');
         setText('lblVersion', version);
+        api().setNoAccessHelp(cfg.noAccessHelpHtml);
         return cfg;
     }
 
-    function initDashboard() {
-        fetchJson('api/config').then(applyConfig).then(function (cfg) {
-            document.title = (cfg.title || 'WebJEA') + ' - WebJEA';
+    function configFailed(err) {
+        console.error('config load failed', err);
+        api().pageAlert(err, { retry: reloadPage });
+    }
 
-            if (cfg.dashboardHtml) {
-                var container = document.getElementById('divDashboardHtml');
-                if (container) {
-                    container.innerHTML = '<div class="card border-0 rounded-0 w-100 dashboard-html"><div class="card-body">'
-                        + sanitizeHtml(cfg.dashboardHtml) + '</div></div>';
-                }
+    function loadDashboardMenu() {
+        var tileView = document.getElementById('divTileView');
+        if (!tileView) return;
+        api().showLoading(tileView);
+
+        requestMenu().then(function (menu) {
+            if (menu.length === 0) {
+                api().renderAlert(tileView, 'noaccess');
+                return;
             }
-        }).catch(function (err) { console.error('config load failed', err); });
 
-        fetchJson('api/menu').then(function (menu) {
             var html = '';
             menu.forEach(function (mi) {
                 html += '<div class="tile">';
@@ -76,9 +87,61 @@
                 }
                 html += '</div></a></div>';
             });
-            var tileView = document.getElementById('divTileView');
-            if (tileView) tileView.innerHTML = html;
-        }).catch(function (err) { console.error('menu load failed', err); });
+            tileView.innerHTML = html;
+        }).catch(function (err) {
+            console.error('menu load failed', err);
+            api().renderAlert(tileView, err, { retry: loadDashboardMenu });
+        });
+    }
+
+    function initDashboard() {
+        api().request('api/config').then(applyConfig).then(function (cfg) {
+            document.title = (cfg.title || 'WebJEA') + ' - WebJEA';
+
+            if (cfg.dashboardHtml) {
+                var container = document.getElementById('divDashboardHtml');
+                if (container) {
+                    container.innerHTML = '<div class="card border-0 rounded-0 w-100 dashboard-html"><div class="card-body">'
+                        + sanitizeHtml(cfg.dashboardHtml) + '</div></div>';
+                }
+            }
+        }).catch(configFailed);
+
+        loadDashboardMenu();
+    }
+
+    // The sidebar only says what's wrong in a word; the main body shows the full alert.
+    function setNavNote(navList, text) {
+        var note = document.createElement('div');
+        note.className = 'nav-note';
+        note.textContent = text;
+        navList.textContent = '';
+        navList.appendChild(note);
+    }
+
+    function loadSidebarMenu(cmdid) {
+        var navList = document.getElementById('nav-list');
+        if (!navList) return;
+        api().showLoading(navList);
+
+        requestMenu().then(function (menu) {
+            if (menu.length === 0) {
+                setNavNote(navList, 'No commands available');
+                return;
+            }
+
+            var html = '';
+            menu.forEach(function (mi) {
+                var css = String(mi.id).toLowerCase() === cmdid.toLowerCase() ? ' active' : '';
+                html += '<a class="nav-item-link' + css + '" href="' + escapeHtml(mi.uri) + '">'
+                    + escapeHtml(mi.displayName)
+                    + '<span class="nav-tip">' + escapeHtml(mi.description) + '</span></a>';
+            });
+            navList.innerHTML = html;
+        }).catch(function (err) {
+            console.error('menu load failed', err);
+            setNavNote(navList, 'Menu unavailable');
+        });
     }
 
     function currentCmdId() {
@@ -93,21 +156,9 @@
     function initCommand() {
         var cmdid = currentCmdId();
 
-        fetchJson('api/config').then(applyConfig)
-            .catch(function (err) { console.error('config load failed', err); });
+        api().request('api/config').then(applyConfig).catch(configFailed);
 
-        fetchJson('api/menu').then(function (menu) {
-            var navList = document.getElementById('nav-list');
-            if (!navList) return;
-            var html = '';
-            menu.forEach(function (mi) {
-                var css = mi.id === cmdid ? ' active' : '';
-                html += '<a class="nav-item-link' + css + '" href="' + escapeHtml(mi.uri) + '">'
-                    + escapeHtml(mi.displayName)
-                    + '<span class="nav-tip">' + escapeHtml(mi.description) + '</span></a>';
-            });
-            navList.innerHTML = html;
-        }).catch(function (err) { console.error('menu load failed', err); });
+        loadSidebarMenu(cmdid);
 
         // sidebar drawer wiring (toggleSidebar/closeSidebar come from startup.js)
         var toggleBtn = document.getElementById('btnToggleSidebar');

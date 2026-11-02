@@ -16,9 +16,8 @@ public static class MenuEndpoint
         }
         catch (Exception ex)
         {
-            dlog.Error("API: " + ex.Message + (ex.InnerException != null ? ": " + ex.InnerException.Message : ""));
-            context.Response.StatusCode = 500;
-            await context.Response.WriteAsJsonAsync(new { error = "Internal server error: configuration failure." });
+            EndpointHelpers.LogConfigFailure(dlog, ex);
+            await EndpointHelpers.WriteErrorAsync(context, 500, EndpointHelpers.ConfigFailureMessage);
             return;
         }
 
@@ -34,6 +33,20 @@ public static class MenuEndpoint
                 Uri = mi.Uri()
             })
             .ToList();
+
+        // The UI shows the same "not available" message for both reasons; the log says which.
+        if (menu.Count == 0)
+        {
+            int configured = cmdSvc.Config.Commands.Count;
+            if (configured == 0)
+            {
+                dlog.Warn("API: Menu empty for " + uinfo.UserName + ": no commands are configured");
+            }
+            else
+            {
+                dlog.Warn("API: Menu empty for " + uinfo.UserName + ": permitted on 0 of " + configured + " commands");
+            }
+        }
 
         await context.Response.WriteAsJsonAsync(menu);
     }

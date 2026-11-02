@@ -7,6 +7,7 @@
 * There are a handful of top-level settings, including:
   * `Title` — the page title displayed in WebJEA.
   * `DashboardHtml` — HTML shown on the dashboard/landing page.
+  * `NoAccessHelpHtml` — HTML shown after the "Not available" message (see [What users see when something goes wrong](#what-users-see-when-something-goes-wrong)), e.g. a link to your access-request form. Defaults to "Contact your WebJEA administrator if you need access."
   * `BasePath` — default folder for scripts referenced with relative paths.
   * `LogParameters` — whether form inputs are written to the audit log (default `true`; can be overridden per command).
   * `PermittedGroups` — default access groups that have access to all commands.
@@ -32,7 +33,23 @@ Edit `webjea.json` directly in an editor that understands JSON schemas, such as 
 
 The editor then autocompletes property names, shows each setting's description, and flags wrong types and missing required values (`Title`, `Commands`, and each command's `Id`) before WebJEA loads the file. Changes take effect on the next page load.
 
-The WebJEAConfig PowerShell module is retired and does not support settings added since the classic release (such as `DashboardHtml` and `RenderMode`). Use the schema instead.
+The WebJEAConfig PowerShell module is retired and does not support settings added since the classic release (such as `DashboardHtml`, `NoAccessHelpHtml` and `RenderMode`). Use the schema instead.
+
+## What users see when something goes wrong
+
+WebJEA shows users a short message and writes the details to `webjea.log`. Users see the same "Not available" message whether no commands are configured, they aren't permitted on any, or they opened a command that doesn't exist or that they aren't permitted on. This way the page never reveals which command Ids exist. The log says which case it was:
+
+| Users see | Log entry (Warn) | Cause |
+|---|---|---|
+| **Not available.** + `NoAccessHelpHtml` | `API: Menu empty for <user>: no commands are configured` | `"Commands": []` |
+| | `API: Menu empty for <user>: permitted on 0 of N commands` | The user is in none of the commands' `PermittedGroups` |
+| | `API: User <user> requested cmdid <id>: not found in config` | A link or bookmark to a command Id that doesn't exist |
+| | `API: User <user> denied cmdid <id>: not in any permitted group` | The command exists, but the user isn't permitted on it |
+| **Something went wrong.** + a reference ID | An Error entry with the same request ID | For example, `webjea.json` doesn't parse or is missing `Commands` |
+| **Can't reach WebJEA.** | None | The server is down or unreachable |
+| **Your session has expired.** | None | Sign-in expired; reloading the page signs the user in again |
+
+Every `webjea.log` line includes the request ID, so you can search the log for the reference ID a user reports.
 
 ## Writing scripts
 

@@ -98,6 +98,7 @@
     var STREAM_MAP = {
         'debug':   { css: 'psdebug',   prefix: 'DEBUG: '   },
         'err':     { css: 'pserror',   prefix: ''           },
+        'error':   { css: 'pserror',   prefix: ''           },  // parameter validation failures
         'warn':    { css: 'pswarning', prefix: 'WARNING: ' },
         'info':    { css: 'psoutput',  prefix: ''           },
         'output':  { css: 'psoutput',  prefix: ''           },
@@ -247,6 +248,20 @@
         el.innerHTML = '<img src="resources/loader.svg" alt="Loading..." width="150" />';
     }
 
+    // A 400 is about the request itself (e.g. which parameter failed validation), so it
+    // goes in the console with the other script output. Everything else gets an alert.
+    function renderExecuteError(outputEl, err) {
+        var data = err && err.body;
+        if (err && err.status === 400 && data) {
+            var messages = [{ stream: 'err', message: data.statusmessage || 'Request failed.' }]
+                .concat(Array.isArray(data.messages) ? data.messages : []);
+            renderApiResponse(outputEl, { messages: messages, output: null });
+            return;
+        }
+
+        global.webjeaApi.renderAlert(outputEl, err);
+    }
+
     function callApi(cmdid, params, runOnload, verbose, loaderEl, outputEl, completeCallback) {
         showLoader(loaderEl);
 
@@ -257,21 +272,16 @@
             parameters: params
         };
 
-        fetch('api/execute', {
+        global.webjeaApi.request('api/execute', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
         })
-        .then(function (response) {
-            return response.json().then(function (data) {
-                return { status: response.status, data: data };
-            });
-        })
-        .then(function (result) {
-            renderApiResponse(outputEl, result.data);
+        .then(function (data) {
+            renderApiResponse(outputEl, data);
         })
         .catch(function (err) {
-            outputEl.innerHTML = purify('<span class="pserror">Request failed: ' + escapeHtml(String(err)) + '</span><br/>');
+            renderExecuteError(outputEl, err);
         })
         .finally(function () {
             try {
@@ -364,7 +374,9 @@
             escapeHtml: escapeHtml,
             sanitizeUrl: sanitizeUrl,
             isSafeCssClass: isSafeCssClass,
-            processTagMarkup: processTagMarkup
+            processTagMarkup: processTagMarkup,
+            renderMessage: renderMessage,
+            renderExecuteError: renderExecuteError
         };
     }
 

@@ -1,6 +1,19 @@
 'use strict';
 
-const { escapeHtml, sanitizeUrl, isSafeCssClass, processTagMarkup } = require('../../WebJEA/wwwroot/resources/PSWebParser.js');
+const { escapeHtml, sanitizeUrl, isSafeCssClass, processTagMarkup, renderMessage } = require('../../WebJEA/wwwroot/resources/PSWebParser.js');
+
+// ── renderMessage ─────────────────────────────────────────────────────────────
+
+describe('renderMessage', () => {
+    test.each([
+        ['err', 'pserror'],
+        ['error', 'pserror'], // /api/execute parameter validation failures
+        ['warn', 'pswarning'],
+        ['unknown', 'psoutput']
+    ])('renders the %p stream as %p', (stream, css) => {
+        expect(renderMessage(stream, 'text')).toContain('class="' + css + '"');
+    });
+});
 
 // ── escapeHtml ────────────────────────────────────────────────────────────────
 

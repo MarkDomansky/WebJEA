@@ -5,6 +5,55 @@ namespace WebJEA.Api;
 
 internal static class EndpointHelpers
 {
+    /// <summary>
+    /// The single response for a command that doesn't exist and for one the user isn't
+    /// permitted on, so the API never reveals which command Ids exist. The log records
+    /// which of the two it was (<see cref="LogAccessFailure"/>).
+    /// </summary>
+    public const string NoAccessMessage = "Not available. Either no matching commands exist or you don't have permission to use them.";
+
+    public const string ConfigFailureMessage = "Internal server error: configuration failure.";
+
+    /// <summary>
+    /// The ID webjea.log records on every line for this request, so a user's reference ID
+    /// finds the log entry. NLog's ${aspnet-TraceIdentifier} prefers the W3C activity ID
+    /// over HttpContext.TraceIdentifier, so this does too.
+    /// </summary>
+    public static string RequestId(HttpContext context)
+    {
+        return System.Diagnostics.Activity.Current?.Id ?? context.TraceIdentifier;
+    }
+
+    /// <summary>Writes the error body the GET endpoints share.</summary>
+    public static Task WriteErrorAsync(HttpContext context, int statusCode, string message)
+    {
+        context.Response.StatusCode = statusCode;
+        return context.Response.WriteAsJsonAsync(new { error = message, requestId = RequestId(context) });
+    }
+
+    public static void LogConfigFailure(NLog.Logger log, Exception ex)
+    {
+        log.Error("API: " + ex.Message + (ex.InnerException != null ? ": " + ex.InnerException.Message : ""));
+    }
+
+    public static void LogAccessFailure(NLog.Logger log, IUserContext uinfo, string cmdid, CommandAccess access)
+    {
+        if (access == CommandAccess.NotFound)
+        {
+            log.Warn("API: User " + uinfo.UserName + " requested cmdid " + cmdid + ": not found in config");
+        }
+        else
+        {
+            log.Warn("API: User " + uinfo.UserName + " denied cmdid " + cmdid + ": not in any permitted group");
+        }
+    }
+
+    /// <summary>Config lower-cases command Ids (ConfigCmd.ID), so requests must too.</summary>
+    public static string NormalizeCommandId(string cmdid)
+    {
+        return (cmdid ?? "").ToLowerInvariant();
+    }
+
     /// <summary>Loads the WebJEA config for this request (per-request reload, parity with WebForms pages).</summary>
     public static CommandService LoadCommandService(HttpContext context)
     {
