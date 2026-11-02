@@ -108,6 +108,17 @@ if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/error.html");
 }
 
+// API callers get JSON, never the HTML error page, so the SPA can show a reference ID
+// that matches the webjea.log entry. The middleware itself logs the exception.
+app.UseWhen(context => context.Request.Path.StartsWithSegments("/api"), api =>
+{
+    api.UseExceptionHandler(handler => handler.Run(async context =>
+    {
+        context.Response.StatusCode = 500;
+        await context.Response.WriteAsJsonAsync(new { error = "Internal server error.", requestId = EndpointHelpers.RequestId(context) });
+    }));
+});
+
 // Before authentication so plain-HTTP requests are redirected instead of challenged.
 app.UseHttpsRedirection();
 

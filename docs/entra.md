@@ -162,7 +162,7 @@ If your scripts parse `DOMAIN\user`, update them before switching to Entra mode.
 
 ## Troubleshooting
 
-Entra errors are written to the WebJEA log. Most authorization problems show up as an empty or partial menu rather than an error page.
+Entra errors are written to the WebJEA log. Most authorization problems show up as a partial menu, or as the "Not available" message instead of a menu. The log records why ([What users see when something goes wrong](Usage.md#what-users-see-when-something-goes-wrong)).
 
 | Log message | Cause | Fix |
 |---|---|---|
@@ -176,7 +176,7 @@ Entra errors are written to the WebJEA log. Most authorization problems show up 
 | `AADSTS700027: The certificate with identifier used to sign the client assertion is not registered on application` | The certificate WebJEA loaded isn't uploaded to the app registration, e.g. a renewed certificate whose `.cer` wasn't uploaded. | Upload the `.cer` under **Certificates & secrets** → **Certificates** ([Step 4, Option A](entra-appreg.md#option-a-certificate-recommended)). |
 | `EntraUserContext: group overage detected ... EnableGraph is false` | Graph is turned off, so the token can carry only a limited number of groups. A user in more than ~200 groups gets no `groups` claim. With Graph off, sign-in can also fall back to the implicit flow, where Entra sends a `hasgroups` marker instead of the groups once a user is in more than **5** groups. | Set `EnableGraph: true` (the default) and complete [App registration Steps 4–5](entra-appreg.md#step-4-add-a-client-credential) (client credential and Graph permission), then have affected users sign out and back in. |
 | `EntraGroupResolver: '<entry>' is not a GUID; matching it as an app role value or UPN.` (Trace) | Informational. If `<entry>` was meant to be a group, it didn't resolve. | Use the group's object ID. Windows-style entries never match; see [Switching from Windows mode](#switching-from-windows-mode). |
-| Menu is empty, no errors | The user's token has none of the `PermittedGroups` entries. | Check that the groups claim is configured ([Step 3](entra-appreg.md#step-3-add-the-groups-claim)) and that the user signed in again after the change. With [advanced options](entra-advanced.md), also check assignments on the enterprise application and that the user is a **direct** member of any assigned group. |
+| Users see "Not available" instead of a menu; the log shows `API: Menu empty for <user>: permitted on 0 of N commands` | The user's token has none of the `PermittedGroups` entries. | Check that the groups claim is configured ([Step 3](entra-appreg.md#step-3-add-the-groups-claim)) and that the user signed in again after the change. With [advanced options](entra-advanced.md), also check assignments on the enterprise application and that the user is a **direct** member of any assigned group. |
 
 ## Related
 

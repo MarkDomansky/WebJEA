@@ -19,9 +19,8 @@ public static class AppInfoEndpoint
         }
         catch (Exception ex)
         {
-            dlog.Error("API: " + ex.Message + (ex.InnerException != null ? ": " + ex.InnerException.Message : ""));
-            context.Response.StatusCode = 500;
-            await context.Response.WriteAsJsonAsync(new { error = "Internal server error: configuration failure." });
+            EndpointHelpers.LogConfigFailure(dlog, ex);
+            await EndpointHelpers.WriteErrorAsync(context, 500, EndpointHelpers.ConfigFailureMessage);
             return;
         }
 
@@ -37,6 +36,7 @@ public static class AppInfoEndpoint
             HtmlLanguage = cmdSvc.Config.HtmlLanguage,
             Version = EndpointHelpers.AppVersion(),
             DashboardHtml = cmdSvc.Config.DashboardHtml,
+            NoAccessHelpHtml = cmdSvc.Config.NoAccessHelpHtml,
             IsGlobalUser = cmdSvc.Auth.IsGlobalUser(uinfo),
             UserName = uinfo.UserName
         };

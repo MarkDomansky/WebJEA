@@ -58,12 +58,19 @@ public class CommandService
     /// Command Ids must be present and unique. Authorization and script lookup resolve
     /// duplicates differently (last match vs first), so a duplicate would let a user
     /// permitted on one entry run the other entry's script.
+    /// Commands itself is required, as the schema says; an empty list is valid and shows
+    /// users the "not available" message.
     /// </summary>
     private static void ValidateCommandIds(IConfigProvider config)
     {
-        if (config?.Commands == null)
+        if (config == null)
         {
-            return;
+            throw new Exception("The config file is empty.");
+        }
+
+        if (config.Commands == null)
+        {
+            throw new Exception("Commands is required. Use \"Commands\": [] for a config with no commands.");
         }
 
         var seen = new HashSet<string>();

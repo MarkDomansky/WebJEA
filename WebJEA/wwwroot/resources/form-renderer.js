@@ -397,24 +397,19 @@
             return;
         }
 
-        fetch('api/command/' + encodeURIComponent(cmdid))
-            .then(function (response) {
-                if (response.status === 403) {
-                    // parity with the old page: unauthorized commands bounce to the dashboard
-                    global.location.replace('./');
-                    return null;
-                }
+        var api = global.webjeaApi;
+        api.showLoading(document.getElementById('divParameters'));
 
-                if (!response.ok) throw new Error('Request failed: ' + response.status);
-                return response.json();
-            })
-            .then(function (metadata) {
-                if (metadata) applyMetadata(metadata);
-            })
+        api.request('api/command/' + encodeURIComponent(cmdid))
+            .then(applyMetadata)
             .catch(function (err) {
+                // Unknown and unauthorized commands both come back 403 and show the same
+                // "not available" alert as an empty dashboard.
                 console.error('command metadata load failed', err);
-                var body = document.getElementById('divCmdBody');
-                if (body) body.textContent = 'Failed to load this command.';
+                api.renderAlert(document.getElementById('divCmdBody'), err, {
+                    retry: function () { global.location.reload(); },
+                    dashboardLink: true
+                });
             });
     };
 

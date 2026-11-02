@@ -9,6 +9,12 @@ public class Config : IConfigProvider
     public bool SendTelemetry { get; set; } = true;
     public string HtmlLanguage { get; set; } = "en-US";
     public string DashboardHtml { get; set; }
+
+    /// <summary>
+    /// HTML that follows the "not available" message (empty menu, unknown or denied
+    /// command). Unset means the client's default "Contact your WebJEA administrator..." line.
+    /// </summary>
+    public string NoAccessHelpHtml { get; set; }
     public bool ShowVerbose { get; set; } = true;
     [Newtonsoft.Json.JsonConverter(typeof(SingleOrListConverter))]
     public List<string> PermittedGroups { get; set; } = new List<string>();

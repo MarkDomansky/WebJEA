@@ -138,7 +138,7 @@ WebJEA uses Graph, authenticating with the credential from [Step 4](#step-4-add-
 > [!IMPORTANT]
 >
 > - **Why Graph is required: the ~200-group limit.** Entra omits the `groups` claim entirely for a user in more than 200 groups, counting nested groups. Without Graph, every group entry fails for that user, even groups they are a direct member of. This happens silently, and large or long-lived tenants hit it more often than you might expect. With Graph, WebJEA fetches the user's full membership instead. See [Group overage](entra.md#group-overage-users-in-more-than-200-groups).
-> - **Admin consent is required, not optional.** WebJEA acquires the Graph token silently in the background, so users never see a consent prompt, and `GroupMember.Read.All` needs admin consent anyway. Without consent, sign-in still succeeds, but every Graph call fails and WebJEA quietly falls back to token-only matching. Users then see an empty or partial menu. See [Troubleshooting](entra.md#troubleshooting).
+> - **Admin consent is required, not optional.** WebJEA acquires the Graph token silently in the background, so users never see a consent prompt, and `GroupMember.Read.All` needs admin consent anyway. Without consent, sign-in still succeeds, but every Graph call fails and WebJEA quietly falls back to token-only matching. Users then see a partial menu or the "Not available" message. See [Troubleshooting](entra.md#troubleshooting).
 
 ## Next
 

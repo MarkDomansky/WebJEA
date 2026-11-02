@@ -7,6 +7,7 @@ public interface IAuthorizationService
     void InitGroups(IConfigProvider config, IGroupResolver grpfinder);
     bool IsGlobalUser(IUserContext uinfo);
     bool IsCommandAvailable(IUserContext uinfo, string commandId);
+    CommandAccess CheckCommandAccess(IUserContext uinfo, string commandId);
     ConfigCmd GetCommand(IUserContext uinfo, string commandId);
     List<MenuItem> GetMenu(IUserContext uinfo);
 

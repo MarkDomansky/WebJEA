@@ -69,6 +69,8 @@ public static class ExecuteEndpoint
                 return;
             }
 
+            cmdid = EndpointHelpers.NormalizeCommandId(cmdid);
+
             JObject requestParams = null;
             if (requestObj.TryGetValue("parameters", out JToken paramToken))
             {
@@ -91,19 +93,20 @@ public static class ExecuteEndpoint
             }
             catch (Exception ex)
             {
-                dlog.Error("API: " + ex.Message + (ex.InnerException != null ? ": " + ex.InnerException.Message : ""));
-                await WriteResponse(context, 500, "Internal server error: configuration failure.");
+                EndpointHelpers.LogConfigFailure(dlog, ex);
+                await WriteResponse(context, 500, EndpointHelpers.ConfigFailureMessage);
                 return;
             }
 
             // Build the user context from the authenticated principal
             IUserContext uinfo = EndpointHelpers.GetUserContext(context);
 
-            // Check authorization
-            if (!cmdSvc.Auth.IsCommandAvailable(uinfo, cmdid))
+            // Check authorization. Same 403 for unknown and denied Ids; only the log says which.
+            CommandAccess access = cmdSvc.Auth.CheckCommandAccess(uinfo, cmdid);
+            if (access != CommandAccess.Allowed)
             {
-                dlog.Warn("API: User " + uinfo.UserName + " denied access to cmdid " + cmdid);
-                await WriteResponse(context, 403, "Access denied. Command not available or insufficient permissions.");
+                EndpointHelpers.LogAccessFailure(dlog, uinfo, cmdid, access);
+                await WriteResponse(context, 403, EndpointHelpers.NoAccessMessage);
                 return;
             }
 
@@ -121,15 +124,6 @@ public static class ExecuteEndpoint
 
             // Verbose output is for global users only, and only when ShowVerbose allows it
             verbose = verbose && cmdSvc.Config.ShowVerbose && cmdSvc.Auth.IsGlobalUser(uinfo);
-
-            ConfigCmd cmd = cmdSvc.GetCommand(uinfo, cmdid);
-
-            if (cmd == null)
-            {
-                dlog.Error("API: Command " + cmdid + " not found after authorization check");
-                await WriteResponse(context, 403, "Command not found.");
-                return;
-            }
 
             PSCmd scriptCmd = runOnload ? cmdSvc.GetOnloadCmd(cmdid) : cmdSvc.GetScriptCmd(cmdid);
 
@@ -529,6 +523,7 @@ public static class ExecuteEndpoint
         var responseObj = new JObject();
         responseObj["status"] = statusCode;
         responseObj["statusmessage"] = statusMessage;
+        responseObj["requestId"] = EndpointHelpers.RequestId(context);
 
         if (output != null)
         {

@@ -13,7 +13,7 @@ public static class CommandMetadataEndpoint
 
     public static async Task Handle(HttpContext context)
     {
-        string cmdid = context.GetRouteValue("cmdid") as string ?? "";
+        string cmdid = EndpointHelpers.NormalizeCommandId(context.GetRouteValue("cmdid") as string);
 
         CommandService cmdSvc;
         try
@@ -22,9 +22,8 @@ public static class CommandMetadataEndpoint
         }
         catch (Exception ex)
         {
-            dlog.Error("API: " + ex.Message + (ex.InnerException != null ? ": " + ex.InnerException.Message : ""));
-            context.Response.StatusCode = 500;
-            await context.Response.WriteAsJsonAsync(new { error = "Internal server error: configuration failure." });
+            EndpointHelpers.LogConfigFailure(dlog, ex);
+            await EndpointHelpers.WriteErrorAsync(context, 500, EndpointHelpers.ConfigFailureMessage);
             return;
         }
 
@@ -33,18 +32,19 @@ public static class CommandMetadataEndpoint
 
         EndpointHelpers.AddPageLoadTelemetry(context, telemetry, cmdSvc, uinfo);
 
-        ConfigCmd cmd = cmdSvc.GetCommand(uinfo, cmdid);
-
-        if (cmd == null)
+        CommandAccess access = cmdSvc.Auth.CheckCommandAccess(uinfo, cmdid);
+        if (access != CommandAccess.Allowed)
         {
             telemetry.AddIDs(uinfo.OrgId, uinfo.OrgName, cmdid, uinfo.UserName, permitted: false);
             if (cmdSvc.Config.SendTelemetry) telemetry.SendTelemetry();
 
-            dlog.Error("User " + uinfo.UserName + " requested cmdid " + cmdid + " that does not exist (or they don't have access to)");
-            context.Response.StatusCode = 403;
-            await context.Response.WriteAsJsonAsync(new { error = "You do not have access to this command." });
+            // Same 403 for unknown and denied Ids; only the log says which.
+            EndpointHelpers.LogAccessFailure(dlog, uinfo, cmdid, access);
+            await EndpointHelpers.WriteErrorAsync(context, 403, EndpointHelpers.NoAccessMessage);
             return;
         }
+
+        ConfigCmd cmd = cmdSvc.GetCommand(uinfo, cmdid);
 
         PSCmd scriptCmd = cmdSvc.GetScriptCmd(cmdid);
         PSCmd onloadCmd = cmdSvc.GetOnloadCmd(cmdid);

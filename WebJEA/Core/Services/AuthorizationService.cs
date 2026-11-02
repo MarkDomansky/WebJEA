@@ -83,6 +83,21 @@ public class AuthorizationService : IAuthorizationService
         return false;
     }
 
+    /// <summary>
+    /// Like <see cref="IsCommandAvailable"/>, but tells a command that doesn't exist apart
+    /// from one the user isn't permitted on, for logging. Callers must give the user the
+    /// same response for both, so the API doesn't reveal which command Ids exist.
+    /// </summary>
+    public CommandAccess CheckCommandAccess(IUserContext uinfo, string commandId)
+    {
+        if (string.IsNullOrEmpty(commandId) || !_commandGroupSIDs.ContainsKey(commandId))
+        {
+            return CommandAccess.NotFound;
+        }
+
+        return IsCommandAvailable(uinfo, commandId) ? CommandAccess.Allowed : CommandAccess.Denied;
+    }
+
     public ConfigCmd GetCommand(IUserContext uinfo, string commandId)
     {
         ConfigCmd foundCmd = null;

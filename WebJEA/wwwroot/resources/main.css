@@ -302,4 +302,36 @@ input[type="checkbox"] {
     color: #6c757d;
 }
 
+/* ── API alerts and loading states (api.js) ── */
+#divApiAlert:empty {
+    display: none;
+}
+
+.mode-dashboard #divApiAlert {
+    padding: 24px 24px 0;
+}
+
+/* alerts and spinners span the whole tile grid instead of one tile column */
+.tile-grid > .webjea-alert,
+.tile-grid > .webjea-loading {
+    grid-column: 1 / -1;
+}
+
+/* the output console is pre-wrap; keep alert text flowing normally */
+.ps .webjea-alert {
+    font-family: var(--bs-body-font-family);
+    white-space: normal;
+    margin: 0;
+}
+
+.webjea-loading {
+    padding: 12px 16px;
+}
+
+.nav-note {
+    padding: 9px 16px;
+    font-size: 13px;
+    color: #6c757d;
+}
+
 

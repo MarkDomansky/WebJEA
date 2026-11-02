@@ -191,6 +191,39 @@ public class CommandServiceTests
     }
 
     [Fact]
+    public void LoadConfig_EmptyCommands_Loads()
+    {
+        Exception ex = LoadConfigWithCommands();
+
+        Assert.Null(ex);
+    }
+
+    [Theory]
+    [InlineData("{ \"Title\": \"No commands\" }", "Commands is required")]
+    [InlineData("{ \"Commands\": null }", "Commands is required")]
+    [InlineData("", "The config file is empty")]
+    public void LoadConfig_CommandsMissing_ThrowsInvalidConfig(string json, string expected)
+    {
+        string configPath = Path.Combine(Path.GetTempPath(), "webjea-nocmds-" + Guid.NewGuid().ToString("N") + ".json");
+        File.WriteAllText(configPath, json);
+        try
+        {
+            var svc = new CommandService();
+            var mockResolver = new Mock<IGroupResolver>();
+
+            Exception ex = Record.Exception(() => svc.LoadConfig(configPath, mockResolver.Object));
+
+            Assert.NotNull(ex);
+            Assert.Equal("Invalid config file", ex.Message);
+            Assert.Contains(expected, ex.InnerException.Message);
+        }
+        finally
+        {
+            File.Delete(configPath);
+        }
+    }
+
+    [Fact]
     public void LoadConfig_ConfiguredFileMissing_FallsBackToLegacyConfigJson()
     {
         string dir = Path.Combine(Path.GetTempPath(), "webjea-legacyconfig-" + Guid.NewGuid().ToString("N"));

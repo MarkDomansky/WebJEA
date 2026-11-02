@@ -9,6 +9,7 @@ public interface IConfigProvider
     bool SendTelemetry { get; set; }
     string HtmlLanguage { get; set; }
     string DashboardHtml { get; set; }
+    string NoAccessHelpHtml { get; set; }
     bool ShowVerbose { get; set; }
     List<string> PermittedGroups { get; set; }
     string RenderMode { get; set; }

@@ -213,6 +213,90 @@ public class AuthorizationServiceTests
 
     #endregion
 
+    #region CheckCommandAccess
+
+    private AuthorizationService BuildServiceWithCommand(string groupName)
+    {
+        var cmd = new ConfigCmd();
+        cmd.ID = "cmd1";
+        cmd.PermittedGroups = new List<string> { groupName };
+
+        var config = CreateConfig(
+            new List<string> { "Admins" },
+            new List<ConfigCmd> { cmd });
+        var resolver = CreateGroupResolver(new Dictionary<string, string>
+        {
+            { "Admins", "S-1-5-21-ADMINS" },
+            { "Users", "S-1-5-21-USER" },
+            { "*", "*" }
+        });
+        return BuildService(config.Object, resolver.Object);
+    }
+
+    [Fact]
+    public void CheckCommandAccess_PermittedUser_ReturnsAllowed()
+    {
+        var svc = BuildServiceWithCommand("Users");
+
+        var user = CreateUserInfo(new List<string> { "S-1-5-21-USER" });
+
+        Assert.Equal(CommandAccess.Allowed, svc.CheckCommandAccess(user, "cmd1"));
+    }
+
+    [Fact]
+    public void CheckCommandAccess_UserNotInGroup_ReturnsDenied()
+    {
+        var svc = BuildServiceWithCommand("Users");
+
+        var user = CreateUserInfo(new List<string> { "S-1-5-21-OTHER" });
+
+        Assert.Equal(CommandAccess.Denied, svc.CheckCommandAccess(user, "cmd1"));
+    }
+
+    [Fact]
+    public void CheckCommandAccess_UnknownCommand_ReturnsNotFound()
+    {
+        var svc = BuildServiceWithCommand("Users");
+
+        var user = CreateUserInfo(new List<string> { "S-1-5-21-USER" });
+
+        Assert.Equal(CommandAccess.NotFound, svc.CheckCommandAccess(user, "nonexistent"));
+    }
+
+    [Fact]
+    public void CheckCommandAccess_UnknownCommandForGlobalUser_ReturnsNotFound()
+    {
+        var svc = BuildServiceWithCommand("Users");
+
+        var user = CreateUserInfo(new List<string> { "S-1-5-21-ADMINS" });
+
+        // IsCommandAvailable says true here; CheckCommandAccess must still report the Id as unknown
+        Assert.True(svc.IsCommandAvailable(user, "nonexistent"));
+        Assert.Equal(CommandAccess.NotFound, svc.CheckCommandAccess(user, "nonexistent"));
+    }
+
+    [Fact]
+    public void CheckCommandAccess_WildcardGroup_ReturnsAllowed()
+    {
+        var svc = BuildServiceWithCommand("*");
+
+        var user = CreateUserInfo(new List<string> { "S-1-5-21-ANYONE" });
+
+        Assert.Equal(CommandAccess.Allowed, svc.CheckCommandAccess(user, "cmd1"));
+    }
+
+    [Fact]
+    public void CheckCommandAccess_EmptyId_ReturnsNotFound()
+    {
+        var svc = BuildServiceWithCommand("*");
+
+        var user = CreateUserInfo(new List<string> { "S-1-5-21-ANYONE" });
+
+        Assert.Equal(CommandAccess.NotFound, svc.CheckCommandAccess(user, ""));
+    }
+
+    #endregion
+
     #region GetCommand
 
     [Fact]
