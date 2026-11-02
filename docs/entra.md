@@ -51,7 +51,7 @@ Write the group's **display name** instead of its object ID:
 { "PermittedGroups": [ "HR Admins" ] }
 ```
 
-WebJEA looks up each entry that isn't a GUID or a UPN in Microsoft Graph, using the signed-in user's token, and matches the object ID of the group it finds. This is on by default (`ResolveGroupNamesViaGraph: true`). Entries that match no group fall back to app role matching. Two kinds of entry are never looked up: UPN-shaped entries (`user@domain.tld`), and entries starting with the [`AppRolePrefix`](#configure-webjea), if you set one.
+WebJEA looks up each entry that isn't a GUID or a UPN in Microsoft Graph, using the signed-in user's token, and matches the object ID of the group it finds. This is on by default (`ResolveGroupNamesViaGraph: true`). Entries that match no group fall back to app role matching. Three kinds of entry are never looked up: UPN-shaped entries (`user@domain.tld`), Windows-style entries containing `\` (`DOMAIN\group`, `.\Administrators`), and entries starting with the [`AppRolePrefix`](#configure-webjea), if you set one.
 
 Trade-offs:
 
@@ -94,7 +94,7 @@ Useful for a handful of users without creating a group.
 ### How entries are matched
 
 - **GUID** entries match group object IDs in the token's `groups` claim, and the user's own object ID.
-- **Non-GUID** entries match app role values from the `roles` claim and the user's UPN. With `ResolveGroupNamesViaGraph: true` (the default), entries that aren't UPNs and don't start with `AppRolePrefix` are first looked up as [group display names](#group-display-names).
+- **Non-GUID** entries match app role values from the `roles` claim and the user's UPN. With `ResolveGroupNamesViaGraph: true` (the default), entries that aren't UPNs, don't contain `\` and don't start with `AppRolePrefix` are first looked up as [group display names](#group-display-names).
 - `*` matches any authenticated user.
 
 ## Configure WebJEA
@@ -137,7 +137,7 @@ With a **client secret** ([Option B](entra-appreg.md#option-b-client-secret)), r
 WebJEA logs which credential it found at startup (`Entra: Graph client credential = certificate (StoreWithDistinguishedName)`), and warns if `EnableGraph` is on but none is configured.
 
 - `EnableGraph`: `true` (the default) lets WebJEA look up the groups of users in more than 200 groups ([Group overage](#group-overage-users-in-more-than-200-groups)) and resolve [group display names](#group-display-names). It needs a client credential and the Graph permission from [App registration Steps 4–5](entra-appreg.md#step-4-add-a-client-credential). Set it to `false` only if you have no client credential; group display names and overage handling then stop working.
-- `ResolveGroupNamesViaGraph`: `true` (the default) allows [group display names](#group-display-names) in `PermittedGroups`. Object IDs, UPNs and `*` are never looked up. Set it to `false` if you don't use display names.
+- `ResolveGroupNamesViaGraph`: `true` (the default) allows [group display names](#group-display-names) in `PermittedGroups`. Object IDs, UPNs, entries containing `\` and `*` are never looked up. Set it to `false` if you don't use display names.
 - `AppRolePrefix`: entries starting with this prefix (case-insensitive) are treated as [app role](entra-advanced.md#app-roles) values and never looked up in Graph. There is no default. We recommend `WebJEA.`, with every app role value named to match (`WebJEA.HR`, `WebJEA.Admin`). **Groups can't use the prefix:** a group whose display name starts with it can only be referenced by object ID.
 
 Any of these can also be set as environment variables using `__` separators, which is how the [Docker images](docker.md) are configured. `ClientCredentials` entries are numbered from `0` (e.g. `AzureAd__ClientCredentials__0__SourceType=Path`), and a secret is `AzureAd__ClientSecret`. Keep client secrets, PFX files and PFX passwords out of version control.
@@ -152,7 +152,7 @@ Without Graph, WebJEA can't see any of that user's groups, even ones they're a d
 
 ## Switching from Windows mode
 
-By default, Windows-style `PermittedGroups` entries never match in Entra mode. That includes `DOMAIN\group`, `.\Administrators` (used by the starter `webjea.json`), `BUILTIN\...` and SIDs, because the `groups` claim carries Entra object IDs, not AD names. Before switching `Authentication:Mode` to `Entra`, replace them with group object IDs or UPNs. For groups synced from on-premises AD, use the synced group's object ID in Entra.
+By default, Windows-style `PermittedGroups` entries never match in Entra mode. That includes `DOMAIN\group`, `.\Administrators` (used by the starter `webjea.json`), `BUILTIN\...` and SIDs, because the `groups` claim carries Entra object IDs, not AD names. Entries containing `\` are skipped without a Graph lookup, so they cost nothing, but they still never match. Before switching `Authentication:Mode` to `Entra`, replace them with group object IDs or UPNs. For groups synced from on-premises AD, use the synced group's object ID in Entra.
 
 ## WEBJEAUSERNAME
 
@@ -166,7 +166,7 @@ Entra errors are written to the WebJEA log. Most authorization problems show up 
 
 | Log message | Cause | Fix |
 |---|---|---|
-| `AADSTS65001: The user or administrator has not consented to use the application`, followed by `IDW10502: An MsalUiRequiredException was thrown` and `GraphGroupLoader: ... failed` | `GroupMember.Read.All` has not been granted admin consent. | Grant admin consent ([Step 5](entra-appreg.md#step-5-grant-microsoft-graph-permission)), then have affected users sign out and back in. |
+| `Entra: Microsoft Graph denied access (AADSTS65001)` (Warn, logged once until Graph works again), possibly alongside `IDW10502: An MsalUiRequiredException was thrown` | `GroupMember.Read.All` has not been granted admin consent. Group display names and the overage lookup are skipped until it is. | Grant admin consent ([Step 5](entra-appreg.md#step-5-grant-microsoft-graph-permission)), then have affected users sign out and back in. |
 | `AADSTS700054: response_type 'id_token' is not enabled` | ID tokens not enabled on the app registration. | [Step 2](entra-appreg.md#step-2-enable-id-tokens). |
 | `AADSTS50011: The redirect URI ... does not match` | The URL users browse to (or the proxy's external URL) isn't registered. | Add `https://<host>/signin-oidc` under **Authentication** ([Step 1](entra-appreg.md#step-1-create-the-app-registration)). |
 | `AADSTS7000215: Invalid client secret` | Wrong value copied (Secret ID instead of Value) or the secret expired. | Create a new secret and copy the **Value** column ([Step 4, Option B](entra-appreg.md#option-b-client-secret)). |

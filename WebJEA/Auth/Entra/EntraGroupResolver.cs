@@ -6,9 +6,10 @@ namespace WebJEA.Auth.Entra;
 /// Entra ID group resolver: PermittedGroups entries that are GUIDs (group or user object
 /// IDs) pass through normalized. With ResolveGroupNamesViaGraph enabled (the default), non-GUID entries
 /// are first looked up in Graph as group display names, except UPN-shaped entries, which
-/// can't be display names, and entries starting with Authentication:Entra:AppRolePrefix,
-/// which are app role values by definition. Anything else passes through lowercased so it
-/// can match an app role value or UPN in the user's token.
+/// can't be display names, Windows-style entries containing '\' (DOMAIN\group,
+/// .\Administrators), which never match in Entra mode, and entries starting with
+/// Authentication:Entra:AppRolePrefix, which are app role values by definition. Anything
+/// else passes through lowercased so it can match an app role value or UPN in the user's token.
 /// </summary>
 public class EntraGroupResolver : IGroupResolver
 {
@@ -33,6 +34,11 @@ public class EntraGroupResolver : IGroupResolver
         return _appRolePrefix.Length > 0 && input.StartsWith(_appRolePrefix, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsWindowsStyle(string input)
+    {
+        return input.Contains('\\');
+    }
+
     public string GetSID(string input)
     {
         if (input == "*") return "*";
@@ -42,7 +48,7 @@ public class EntraGroupResolver : IGroupResolver
             return groupId.ToString(); // normalized lowercase GUID
         }
 
-        if (_resolveNames && !UpnPattern.IsMatch(input) && !IsAppRole(input))
+        if (_resolveNames && !UpnPattern.IsMatch(input) && !IsWindowsStyle(input) && !IsAppRole(input))
         {
             var loader = _services.GetService<GraphGroupLoader>();
             if (loader != null)
