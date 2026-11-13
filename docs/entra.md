@@ -22,7 +22,7 @@ Setup has three parts:
 
 ### Recommended entries
 
-For the most robust, performant setup, use **group object IDs**, **UPNs**, and **`*`**. These need nothing beyond the [app registration](entra-appreg.md): no premium license and no extra Entra configuration. Group entries include nested group membership, and Microsoft Graph covers users in more than 200 groups. Changes in Entra take effect at the user's **next sign-in**, because claims are fixed in the sign-in token. Matching is case-insensitive.
+For the most robust, performant setup, use **group object IDs**, **UPNs**, and **`*`**. These need nothing beyond the [app registration](entra-appreg.md): no premium license and no extra Entra configuration. Group entries include nested group membership, and Microsoft Graph covers users in more than 200 groups. With a client credential configured, group changes and disabled or revoked accounts take effect **before the user's next script run** ([Near-real-time revocation](#near-real-time-revocation)); without one, they take effect at the user's next sign-in, because claims are fixed in the sign-in token. Matching is case-insensitive.
 
 [Group display names](#group-display-names) also work out of the box, but each one costs a Graph lookup on every request.
 
@@ -134,11 +134,13 @@ With a **client secret** ([Option B](entra-appreg.md#option-b-client-secret)), r
 | `Path` | `CertificateDiskPath`, `CertificatePassword` | Docker: a `.pfx` file mounted read-only ([Docker](docker.md#entra-id-app-registration-setup)). |
 | `Base64Encoded` | `Base64EncodedValue` (the whole `.pfx`, Base64), `CertificatePassword` | Docker or a secret store that injects environment variables. |
 
-WebJEA logs which credential it found at startup (`Entra: Graph client credential = certificate (StoreWithDistinguishedName)`), and warns if `EnableGraph` is on but none is configured.
+WebJEA logs which credential it found at startup (`Entra: Graph client credential = certificate (StoreWithDistinguishedName)`), and warns if `EnableGraph` is on but none is configured. It also logs whether [revalidation before each script run](#near-real-time-revocation) is on.
 
-- `EnableGraph`: `true` (the default) lets WebJEA look up the groups of users in more than 200 groups ([Group overage](#group-overage-users-in-more-than-200-groups)) and resolve [group display names](#group-display-names). It needs a client credential and the Graph permission from [App registration Steps 4–5](entra-appreg.md#step-4-add-a-client-credential). Set it to `false` only if you have no client credential; group display names and overage handling then stop working.
+- `EnableGraph`: `true` (the default) lets WebJEA look up the groups of users in more than 200 groups ([Group overage](#group-overage-users-in-more-than-200-groups)), resolve [group display names](#group-display-names), and, with a client credential, [revalidate users before each script run](#near-real-time-revocation). It needs a client credential and the Graph permission from [App registration Steps 4–5](entra-appreg.md#step-4-add-a-client-credential). Set it to `false` only if you have no client credential; group display names, overage handling and revalidation then stop working.
 - `ResolveGroupNamesViaGraph`: `true` (the default) allows [group display names](#group-display-names) in `PermittedGroups`. Object IDs, UPNs, entries containing `\` and `*` are never looked up. Set it to `false` if you don't use display names.
 - `AppRolePrefix`: entries starting with this prefix (case-insensitive) are treated as [app role](entra-advanced.md#app-roles) values and never looked up in Graph. There is no default. We recommend `WebJEA.`, with every app role value named to match (`WebJEA.HR`, `WebJEA.Admin`). **Groups can't use the prefix:** a group whose display name starts with it can only be referenced by object ID.
+- `RevalidateCacheSeconds`: how long a successful [revalidation](#near-real-time-revocation) is reused for the same user. Default `300` (5 minutes). `0` checks with Graph on every script run.
+- `RevalidateFailOpen`: what happens when Graph can't be reached during revalidation. `false` (the default) refuses to run the script. `true` runs it on the user's sign-in groups instead and logs a warning.
 
 Any of these can also be set as environment variables using `__` separators, which is how the [Docker images](docker.md) are configured. `ClientCredentials` entries are numbered from `0` (e.g. `AzureAd__ClientCredentials__0__SourceType=Path`), and a secret is `AzureAd__ClientSecret`. Keep client secrets, PFX files and PFX passwords out of version control.
 
@@ -146,9 +148,29 @@ The `AzureAd` section name comes from Microsoft.Identity.Web, the library WebJEA
 
 ## Group overage (users in more than 200 groups)
 
-When a user belongs to more than ~200 groups, counting nested groups, Entra omits the `groups` claim entirely and sends an overage marker instead. With `EnableGraph: true`, WebJEA detects this and calls `GET /me/transitiveMemberOf` at sign-in to fetch the user's full list of group object IDs. That adds some latency at sign-in (typically under 500 ms).
+When a user belongs to more than ~200 groups, counting nested groups, Entra omits the `groups` claim entirely and sends an overage marker instead. With `EnableGraph: true`, WebJEA detects this and calls `GET /me/transitiveMemberOf` on each page and API request to fetch the user's full list of group object IDs. That adds some latency to each request (typically under 500 ms).
 
 Without Graph, WebJEA can't see any of that user's groups, even ones they're a direct member of, and logs a warning. UPN, app role and `*` entries still work. Turning Graph off can also lower the limit to as few as 5 groups ([Troubleshooting](#troubleshooting)), so keep the default `EnableGraph: true` and complete the [app registration](entra-appreg.md).
+
+## Near-real-time revocation
+
+Sign-in claims are fixed for the life of the user's session, which is typically about a day. Without a check, a user who is disabled, has their sessions revoked, or is removed from a group could keep running scripts until the session ends. So when `EnableGraph` is on **and** a client credential is configured, WebJEA checks the user with Microsoft Graph immediately before every script run. There is nothing to turn on.
+
+The check is one call to `GET /me/transitiveMemberOf`, made with the user's own token. It does two things:
+
+- **Proves the sign-in is still valid.** WebJEA declares itself capable of [Continuous Access Evaluation](https://learn.microsoft.com/entra/identity/conditional-access/concept-continuous-access-evaluation) (`cp1`), so Graph rejects the token in near real time after a critical event: the account is disabled or deleted, its sessions are revoked, its password is reset, high user risk is detected, or the user signs in from an IP address that a location-based Conditional Access policy blocks. WebJEA then signs the user out, refuses the script, and shows **Please sign in again.** with a Reload button.
+- **Fetches the user's current groups.** These groups, not the ones in the sign-in token, decide whether the script may run. A user added to a group can run its commands straight away. A user removed from a group sees **Your access has changed.**, and reloading the page updates their menu.
+
+A successful check is reused for `RevalidateCacheSeconds` (default 5 minutes), so the delay before a change takes effect is the time Entra takes to send the event (usually a few minutes) plus up to that long.
+
+If Graph can't be reached, is throttling, or denies access (for example, admin consent is missing), the script is refused with **Couldn't verify your sign-in.** and the log says why. To run scripts on the sign-in groups instead, set `RevalidateFailOpen: true`.
+
+Limitations:
+
+- **App roles** come from the sign-in token. A change to a user's role assignment takes effect at their next sign-in. Disabled or revoked users are still blocked.
+- **The menu and command pages** use the groups from the user's last revalidation while it's cached, and otherwise use the token. They don't call Graph themselves.
+- **After WebJEA restarts**, the first script run asks every user to sign in again, because tokens are cached in memory. Reload signs them back in without a prompt.
+- **Without a client credential**, or with `EnableGraph: false`, there is no check. Startup logs `Entra: sign-in revalidation before execute is off`.
 
 ## Switching from Windows mode
 
@@ -166,11 +188,13 @@ Entra errors are written to the WebJEA log. Most authorization problems show up 
 
 | Log message | Cause | Fix |
 |---|---|---|
-| `Entra: Microsoft Graph denied access (AADSTS65001)` (Warn, logged once until Graph works again), possibly alongside `IDW10502: An MsalUiRequiredException was thrown` | `GroupMember.Read.All` has not been granted admin consent. Group display names and the overage lookup are skipped until it is. | Grant admin consent ([Step 5](entra-appreg.md#step-5-grant-microsoft-graph-permission)), then have affected users sign out and back in. |
+| `Entra: Microsoft Graph denied access (AADSTS65001)` (Warn, logged once until Graph works again), possibly alongside `IDW10502: An MsalUiRequiredException was thrown` | `GroupMember.Read.All` has not been granted admin consent. Group display names and the overage lookup are skipped until it is, and scripts are refused with "Couldn't verify your sign-in." ([Near-real-time revocation](#near-real-time-revocation)). | Grant admin consent ([Step 5](entra-appreg.md#step-5-grant-microsoft-graph-permission)), then have affected users sign out and back in. |
 | `AADSTS700054: response_type 'id_token' is not enabled` | ID tokens not enabled on the app registration. | [Step 2](entra-appreg.md#step-2-enable-id-tokens). |
 | `AADSTS50011: The redirect URI ... does not match` | The URL users browse to (or the proxy's external URL) isn't registered. | Add `https://<host>/signin-oidc` under **Authentication** ([Step 1](entra-appreg.md#step-1-create-the-app-registration)). |
 | `AADSTS7000215: Invalid client secret` | Wrong value copied (Secret ID instead of Value) or the secret expired. | Create a new secret and copy the **Value** column ([Step 4, Option B](entra-appreg.md#option-b-client-secret)). |
-| `Entra: Authentication:Entra:EnableGraph is true but no client credential is configured` (at startup) | Neither `AzureAd:ClientCredentials` nor `AzureAd:ClientSecret` is set (or the environment variables didn't reach the app). | Configure a credential ([Configure WebJEA](#configure-webjea)), or set `EnableGraph: false` if you can't. |
+| `Entra: Authentication:Entra:EnableGraph is true but no client credential is configured` (at startup) | Neither `AzureAd:ClientCredentials` nor `AzureAd:ClientSecret` is set (or the environment variables didn't reach the app). [Revalidation before each script run](#near-real-time-revocation) is off. | Configure a credential ([Configure WebJEA](#configure-webjea)), or set `EnableGraph: false` if you can't. |
+| `Entra: signed out <user> before execute: sign-in no longer valid (<code>)` | The user was disabled, their sessions were revoked, or their password was reset. `user_null` means WebJEA restarted and has no cached token for the user. | None needed. The user reloads and signs in again, or is blocked by Entra. |
+| `Entra: couldn't revalidate <user> (<reason>); execute refused.` | Graph couldn't be reached, is throttling (`Graph HTTP 429`), or denied access (`AADSTS65001`: missing admin consent). | Check outbound access to `graph.microsoft.com` and admin consent ([Step 5](entra-appreg.md#step-5-grant-microsoft-graph-permission)). To run scripts anyway during an outage, set `RevalidateFailOpen: true`. |
 | `IDW10109: All client certificates passed to the configuration have expired or can't be loaded` | No valid certificate matched: wrong `CertificateDistinguishedName`/thumbprint or store, the certificate expired, or the PFX path or password is wrong. The full message lists the reason for each certificate. | Check the subject matches exactly (`CN=WebJEA-Graph`) and the certificate is in `LocalMachine\My` and not expired. In Docker, check the mount and `CertificatePassword`. |
 | `Keyset does not exist` / `CryptographicException` while loading the certificate | The service account can't read the certificate's private key. Common after a renewal, because the new key file has default permissions. | Grant the service account **Read** on the private key ([Step 4, Option A](entra-appreg.md#option-a-certificate-recommended), step 3). In Docker, make the PFX readable by the container's `app` user. |
 | `AADSTS700027: The certificate with identifier used to sign the client assertion is not registered on application` | The certificate WebJEA loaded isn't uploaded to the app registration, e.g. a renewed certificate whose `.cer` wasn't uploaded. | Upload the `.cer` under **Certificates & secrets** → **Certificates** ([Step 4, Option A](entra-appreg.md#option-a-certificate-recommended)). |

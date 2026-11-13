@@ -127,7 +127,7 @@ Keep the secret out of version control: use environment variables, a compose `.e
 
 ## Step 5: Grant Microsoft Graph permission
 
-WebJEA uses Graph, authenticating with the credential from [Step 4](#step-4-add-a-client-credential), to look up a user's groups when they're missing from the token (see the note below).
+WebJEA uses Graph, authenticating with the credential from [Step 4](#step-4-add-a-client-credential), to look up a user's groups when they're missing from the token, and to recheck the user before every script run (see the note below).
 
 1. Go to **API permissions** → **+ Add a permission** → **Microsoft Graph** → **Delegated permissions**.
 2. Search for and select **GroupMember.Read.All**.
@@ -138,7 +138,8 @@ WebJEA uses Graph, authenticating with the credential from [Step 4](#step-4-add-
 > [!IMPORTANT]
 >
 > - **Why Graph is required: the ~200-group limit.** Entra omits the `groups` claim entirely for a user in more than 200 groups, counting nested groups. Without Graph, every group entry fails for that user, even groups they are a direct member of. This happens silently, and large or long-lived tenants hit it more often than you might expect. With Graph, WebJEA fetches the user's full membership instead. See [Group overage](entra.md#group-overage-users-in-more-than-200-groups).
-> - **Admin consent is required, not optional.** WebJEA acquires the Graph token silently in the background, so users never see a consent prompt, and `GroupMember.Read.All` needs admin consent anyway. Without consent, sign-in still succeeds, but every Graph call fails and WebJEA quietly falls back to token-only matching. Users then see a partial menu or the "Not available" message. See [Troubleshooting](entra.md#troubleshooting).
+> - **Why Graph is required: revoking access.** Without Graph, a disabled or revoked user, or one removed from a group, can keep running scripts until their session ends. With Graph, WebJEA rechecks the user before every script run and blocks them within minutes. See [Near-real-time revocation](entra.md#near-real-time-revocation).
+> - **Admin consent is required, not optional.** WebJEA acquires the Graph token silently in the background, so users never see a consent prompt, and `GroupMember.Read.All` needs admin consent anyway. Without consent, sign-in still succeeds, but every Graph call fails. Menus fall back to token-only matching, so users see a partial menu or the "Not available" message, and scripts are refused with "Couldn't verify your sign-in." See [Troubleshooting](entra.md#troubleshooting).
 
 ## Next
 

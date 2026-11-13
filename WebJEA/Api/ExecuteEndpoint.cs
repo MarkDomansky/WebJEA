@@ -2,6 +2,7 @@ using System.Management.Automation;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using WebJEA.Auth;
 
 namespace WebJEA.Api;
 
@@ -98,13 +99,49 @@ public static class ExecuteEndpoint
                 return;
             }
 
-            // Build the user context from the authenticated principal
-            IUserContext uinfo = EndpointHelpers.GetUserContext(context);
+            // Build the user context from the authenticated principal. In Entra mode with
+            // Graph, revalidate first: a revoked sign-in is rejected, and the user's current
+            // groups (not the sign-in token's) decide access.
+            IUserContext uinfo;
+            IUserContext signInUser = null;
+            var revalidator = context.RequestServices.GetService<IUserRevalidator>();
+            if (revalidator == null)
+            {
+                uinfo = EndpointHelpers.GetUserContext(context);
+            }
+            else
+            {
+                RevalidationResult revalidation = await revalidator.RevalidateAsync(context);
+                if (revalidation.Status == RevalidationStatus.Revoked)
+                {
+                    await WriteResponse(context, 401, EndpointHelpers.SignInAgainMessage);
+                    return;
+                }
+
+                if (revalidation.Status == RevalidationStatus.Unavailable)
+                {
+                    await WriteResponse(context, 503, EndpointHelpers.VerifyUnavailableMessage);
+                    return;
+                }
+
+                uinfo = revalidation.User;
+                signInUser = revalidation.SignInUser;
+            }
 
             // Check authorization. Same 403 for unknown and denied Ids; only the log says which.
             CommandAccess access = cmdSvc.Auth.CheckCommandAccess(uinfo, cmdid);
             if (access != CommandAccess.Allowed)
             {
+                // Allowed by the sign-in token but not by current groups: the user lost access
+                // since signing in. Say so, so they know a reload will update their menu.
+                if (signInUser != null && access == CommandAccess.Denied &&
+                    cmdSvc.Auth.CheckCommandAccess(signInUser, cmdid) == CommandAccess.Allowed)
+                {
+                    dlog.Info("API: User " + uinfo.UserName + " access to cmdid " + cmdid + " removed since sign-in (current Entra groups)");
+                    await WriteResponse(context, 403, EndpointHelpers.AccessChangedMessage, reason: "accesschanged");
+                    return;
+                }
+
                 EndpointHelpers.LogAccessFailure(dlog, uinfo, cmdid, access);
                 await WriteResponse(context, 403, EndpointHelpers.NoAccessMessage);
                 return;
@@ -516,7 +553,8 @@ public static class ExecuteEndpoint
     private static async Task WriteResponse(HttpContext context, int statusCode, string statusMessage,
                                             JToken output = null,
                                             List<string> validationErrors = null,
-                                            JArray messages = null)
+                                            JArray messages = null,
+                                            string reason = null)
     {
         context.Response.StatusCode = statusCode;
 
@@ -524,6 +562,12 @@ public static class ExecuteEndpoint
         responseObj["status"] = statusCode;
         responseObj["statusmessage"] = statusMessage;
         responseObj["requestId"] = EndpointHelpers.RequestId(context);
+
+        // Additive: only set when the SPA should show a more specific message
+        if (reason != null)
+        {
+            responseObj["reason"] = reason;
+        }
 
         if (output != null)
         {

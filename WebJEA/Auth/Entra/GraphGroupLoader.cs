@@ -1,6 +1,21 @@
 using Microsoft.Graph;
+using Microsoft.Identity.Client;
+using Microsoft.Kiota.Abstractions;
 
 namespace WebJEA.Auth.Entra;
+
+public enum GroupLookupStatus
+{
+    Ok,
+
+    /// <summary>The user's sign-in is no longer valid (revoked, disabled, or no cached token).</summary>
+    SignInRequired,
+
+    /// <summary>Graph couldn't answer: consent missing, throttled, down, or unreachable.</summary>
+    Unavailable
+}
+
+public sealed record GroupLookup(GroupLookupStatus Status, IReadOnlyList<string> Ids, string Detail);
 
 /// <summary>
 /// Microsoft Graph lookups for Entra mode: the transitive group membership fallback for
@@ -68,6 +83,64 @@ public class GraphGroupLoader
 
             return new List<string>();
         }
+    }
+
+    /// <summary>
+    /// The user's transitive group IDs, for the pre-execute revalidation. Unlike
+    /// GetTransitiveGroupIds, failures are reported rather than swallowed, so the caller
+    /// can tell a revoked sign-in from a Graph outage.
+    /// </summary>
+    public virtual GroupLookup LoadTransitiveGroupIdsForRevalidation()
+    {
+        if (_consentMissing) return new GroupLookup(GroupLookupStatus.Unavailable, Array.Empty<string>(), ConsentRequiredCode);
+
+        try
+        {
+            var ids = QueryTransitiveGroupIds();
+            OnGraphSuccess();
+            return new GroupLookup(GroupLookupStatus.Ok, ids, "");
+        }
+        catch (Exception ex)
+        {
+            GroupLookupStatus status = ClassifyFailure(ex);
+            if (!HandleConsentFailure(ex) && status == GroupLookupStatus.Unavailable)
+            {
+                dlog.Error("GraphGroupLoader: revalidation transitiveMemberOf query failed: " + ex.Message);
+            }
+
+            return new GroupLookup(status, Array.Empty<string>(), DescribeFailure(ex));
+        }
+    }
+
+    /// <summary>
+    /// Consent failures are Unavailable (a misconfiguration, not a revocation). Any other
+    /// MsalUiRequiredException, or a Graph 401 (a CAE claims challenge that couldn't be
+    /// satisfied), means the user must sign in again. Everything else is Unavailable.
+    /// </summary>
+    internal static GroupLookupStatus ClassifyFailure(Exception ex)
+    {
+        if (IsConsentRequired(ex)) return GroupLookupStatus.Unavailable;
+
+        for (Exception e = ex; e != null; e = e.InnerException)
+        {
+            if (e is MsalUiRequiredException) return GroupLookupStatus.SignInRequired;
+            if (e is ApiException api && api.ResponseStatusCode == 401) return GroupLookupStatus.SignInRequired;
+        }
+
+        return GroupLookupStatus.Unavailable;
+    }
+
+    private static string DescribeFailure(Exception ex)
+    {
+        if (IsConsentRequired(ex)) return ConsentRequiredCode;
+
+        for (Exception e = ex; e != null; e = e.InnerException)
+        {
+            if (e is MsalException msal) return msal.ErrorCode;
+            if (e is ApiException api && api.ResponseStatusCode != 0) return "Graph HTTP " + api.ResponseStatusCode;
+        }
+
+        return ex.GetType().Name;
     }
 
     public virtual string FindGroupIdByDisplayName(string displayName)

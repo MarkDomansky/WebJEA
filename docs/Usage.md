@@ -47,7 +47,9 @@ WebJEA shows users a short message and writes the details to `webjea.log`. Users
 | | `API: User <user> denied cmdid <id>: not in any permitted group` | The command exists, but the user isn't permitted on it |
 | **Something went wrong.** + a reference ID | An Error entry with the same request ID | For example, `webjea.json` doesn't parse or is missing `Commands` |
 | **Can't reach WebJEA.** | None | The server is down or unreachable |
-| **Your session has expired.** | None | Sign-in expired; reloading the page signs the user in again |
+| **Please sign in again.** | None, or in Entra mode `Entra: signed out <user> before execute: sign-in no longer valid (...)` | Sign-in expired or, in Entra mode, was revoked ([Near-real-time revocation](entra.md#near-real-time-revocation)); reloading the page signs the user in again |
+| **Your access has changed.** (Entra mode) | `API: User <user> access to cmdid <id> removed since sign-in (current Entra groups)` (Info) | The user was removed from the command's groups after signing in; reloading the page updates the menu |
+| **Couldn't verify your sign-in.** + a reference ID (Entra mode) | `Entra: couldn't revalidate <user> (...); execute refused.` | Microsoft Graph couldn't be reached or denied access, so the script didn't run ([Near-real-time revocation](entra.md#near-real-time-revocation)) |
 
 Every `webjea.log` line includes the request ID, so you can search the log for the reference ID a user reports.
 

@@ -13,6 +13,14 @@ public class EntraUserContextFactory : IUserContextFactory
 
     public IUserContext Create(ClaimsPrincipal principal)
     {
+        // Groups from a recent pre-execute revalidation are newer than the token's, so the
+        // menu and command metadata agree with what execute allows.
+        var cache = _services.GetService<RevalidationCache>();
+        if (cache != null && cache.TryGet(principal, out var groupIds))
+        {
+            return EntraUserContext.FromGraphGroups(principal, groupIds);
+        }
+
         var graphGroupLoader = _services.GetService<GraphGroupLoader>();
         return new EntraUserContext(principal, graphGroupLoader);
     }

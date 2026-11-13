@@ -439,6 +439,7 @@ function Step_ContainerVerify([string]$OsNote)
             'docker ps                                   # webjea container Up'
             'docker compose logs -f webjea    # startup log; Ctrl+C to detach'
             'curl.exe -s -o NUL -w "%{http_code}`n" http://localhost:8080/   # 302 to Entra sign-in'
+            'curl.exe -s -o NUL -w "%{http_code}`n" http://localhost:8080/api/menu   # 401 (API never redirects)'
             'curl.exe -s -o NUL -w "%{http_code} -> %{redirect_url}`n" http://localhost:8080/webjea/'
         )
         Verify = @(
