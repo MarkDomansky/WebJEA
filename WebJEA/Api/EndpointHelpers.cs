@@ -14,6 +14,15 @@ internal static class EndpointHelpers
 
     public const string ConfigFailureMessage = "Internal server error: configuration failure.";
 
+    /// <summary>Execute refused because the user's sign-in is no longer valid (they've been signed out).</summary>
+    public const string SignInAgainMessage = "Your sign-in is no longer valid. Reload the page to sign in again.";
+
+    /// <summary>Execute refused because the user's sign-in couldn't be verified with the identity provider.</summary>
+    public const string VerifyUnavailableMessage = "Couldn't verify your sign-in. Try again in a few minutes.";
+
+    /// <summary>Execute refused because the user lost access to the command since signing in.</summary>
+    public const string AccessChangedMessage = "Your access has changed. You no longer have permission to run this command.";
+
     /// <summary>
     /// The ID webjea.log records on every line for this request, so a user's reference ID
     /// finds the log entry. NLog's ${aspnet-TraceIdentifier} prefers the W3C activity ID

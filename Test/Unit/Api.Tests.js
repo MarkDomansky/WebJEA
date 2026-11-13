@@ -124,6 +124,31 @@ describe('request', () => {
         expect(err.body).toEqual(body);
     });
 
+    test('403 with reason accesschanged is accesschanged', async () => {
+        respondWith(mockResponse(403, { status: 403, statusmessage: 'Your access has changed.', reason: 'accesschanged', messages: [] }));
+
+        const err = await rejection(api.request('api/execute', { method: 'POST' }));
+
+        expect(err.kind).toBe('accesschanged');
+    });
+
+    test('503 JSON from WebJEA is unverified, with the request ID', async () => {
+        respondWith(mockResponse(503, { status: 503, statusmessage: "Couldn't verify your sign-in.", requestId: 'req-503', messages: [] }));
+
+        const err = await rejection(api.request('api/execute', { method: 'POST' }));
+
+        expect(err.kind).toBe('unverified');
+        expect(err.requestId).toBe('req-503');
+    });
+
+    test('a proxy HTML 503 is a server error', async () => {
+        respondWith(mockResponse(503, '<html>Service Unavailable</html>'));
+
+        const err = await rejection(api.request('api/menu'));
+
+        expect(err.kind).toBe('server');
+    });
+
     test('500 JSON is a server error with the request ID', async () => {
         respondWith(mockResponse(500, { error: 'Internal server error: configuration failure.', requestId: 'req-500' }));
 
@@ -218,6 +243,31 @@ describe('renderAlert', () => {
         const buttons = alert.querySelectorAll('button');
         expect(buttons.length).toBe(1);
         expect(buttons[0].textContent).toBe('Reload');
+    });
+
+    test('an ended session asks the user to sign in again', () => {
+        const alert = api.renderAlert(container(), 'session');
+
+        expect(alert.textContent).toContain('Please sign in again. Your session ended. Reload the page to sign in again.');
+        expect(alert.className).toContain('alert-warning');
+    });
+
+    test('changed access explains itself and offers Reload', () => {
+        const alert = api.renderAlert(container(), new api.ApiError('accesschanged', 403, 'x', { requestId: 'req-1' }));
+
+        expect(alert.textContent).toContain('Your access has changed. You no longer have permission to run this command.');
+        expect(alert.className).toContain('alert-warning');
+        expect(alert.querySelector('button').textContent).toBe('Reload');
+        expect(alert.querySelector('.webjea-alert-ref')).toBeNull();
+    });
+
+    test('an unverified sign-in shows the reference ID and can be retried', () => {
+        const retry = jest.fn();
+        const alert = api.renderAlert(container(), new api.ApiError('unverified', 503, 'x', { requestId: 'req-503' }), { retry: retry });
+
+        expect(alert.textContent).toContain("Couldn't verify your sign-in.");
+        expect(alert.querySelector('.webjea-alert-ref').textContent).toBe('Reference: req-503');
+        expect(alert.querySelector('button').textContent).toBe('Try again');
     });
 
     test('dashboardLink adds a link back to the dashboard', () => {
@@ -332,6 +382,19 @@ describe('renderExecuteError', () => {
         renderExecuteError(el, new api.ApiError('noaccess', 403, 'x', { status: 403, messages: [] }));
 
         expect(el.querySelector('.webjea-alert').getAttribute('data-kind')).toBe('noaccess');
+    });
+
+    test.each([
+        ['session', 401],
+        ['accesschanged', 403],
+        ['unverified', 503]
+    ])('a %s error (HTTP %p) shows its alert, not console output', (kind, status) => {
+        const el = document.createElement('span');
+
+        renderExecuteError(el, new api.ApiError(kind, status, 'x', { status: status, messages: [] }));
+
+        expect(el.querySelector('.webjea-alert').getAttribute('data-kind')).toBe(kind);
+        expect(el.querySelector('.pserror')).toBeNull();
     });
 
     test('a 500 shows a server alert with the reference ID', () => {

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Identity.Web;
+using WebJEA.Api;
 
 namespace WebJEA.Auth.Entra;
 
@@ -11,18 +12,31 @@ public static class EntraAuthExtensions
     /// Entra ID (Azure AD) authentication: OIDC web-app sign-in with cookies.
     /// Authorization uses the "groups" claim (group object IDs) and the "roles" claim
     /// (app role values). Authentication:Entra:EnableGraph (on by default) adds the
-    /// >200-group overage fallback and, with Authentication:Entra:ResolveGroupNamesViaGraph,
-    /// display names in PermittedGroups; it needs a client credential, either a certificate
-    /// (AzureAd:ClientCredentials) or AzureAd:ClientSecret.
+    /// >200-group overage fallback, display names in PermittedGroups (with
+    /// Authentication:Entra:ResolveGroupNamesViaGraph), and, when a client credential
+    /// (AzureAd:ClientCredentials certificate or AzureAd:ClientSecret) is configured,
+    /// near-real-time revalidation of the user before each script execution (CAE).
+    /// Unauthenticated /api requests get a 401 instead of a redirect to sign-in.
     /// </summary>
     public static WebApplicationBuilder AddWebJeaEntraAuth(this WebApplicationBuilder builder)
     {
         var azureAd = builder.Configuration.GetSection("AzureAd");
+        bool enableGraph = builder.Configuration.GetValue("Authentication:Entra:EnableGraph", true);
+        bool revalidate = enableGraph && DescribeGraphCredential(azureAd) != "";
+
+        // Declare the CAE client capability before Microsoft.Identity.Web binds the section,
+        // so Graph issues CAE tokens it revokes on critical events (disable, revoke sessions).
+        if (revalidate)
+        {
+            AddClientCapability(builder.Configuration, azureAd, "cp1");
+        }
+
         var authBuilder = builder.Services
             .AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
             .AddMicrosoftIdentityWebApp(azureAd);
 
-        bool enableGraph = builder.Configuration.GetValue("Authentication:Entra:EnableGraph", true);
+        builder.Services.PostConfigure<OpenIdConnectOptions>(OpenIdConnectDefaults.AuthenticationScheme, ReturnUnauthorizedForApi);
+
         if (enableGraph)
         {
             LogGraphCredential(azureAd);
@@ -35,10 +49,65 @@ public static class EntraAuthExtensions
             builder.Services.AddScoped<GraphGroupLoader>();
         }
 
+        if (revalidate)
+        {
+            builder.Services.AddMemoryCache();
+            builder.Services.AddSingleton<RevalidationCache>();
+            builder.Services.AddScoped<IUserRevalidator, EntraRevalidator>();
+
+            int cacheSeconds = Math.Max(0, builder.Configuration.GetValue("Authentication:Entra:RevalidateCacheSeconds", RevalidationCache.DefaultCacheSeconds));
+            bool failOpen = builder.Configuration.GetValue("Authentication:Entra:RevalidateFailOpen", false);
+            dlog.Info("Entra: sign-in revalidation before execute on (cache " + cacheSeconds + "s, " +
+                      (failOpen ? "fail-open" : "fail-closed") + "); CAE client capability cp1 declared.");
+        }
+        else
+        {
+            dlog.Warn("Entra: sign-in revalidation before execute is off (" +
+                      (enableGraph ? "no client credential is configured" : "Authentication:Entra:EnableGraph is false") +
+                      "); disabled or revoked users can run scripts until their session expires.");
+        }
+
         builder.Services.AddScoped<IGroupResolver, EntraGroupResolver>();
         builder.Services.AddScoped<IUserContextFactory, EntraUserContextFactory>();
 
         return builder;
+    }
+
+    /// <summary>
+    /// API calls can't follow a redirect to the Entra sign-in page, so an unauthenticated
+    /// /api request gets a 401 (the SPA offers a reload, which signs in). Pages still redirect.
+    /// </summary>
+    private static void ReturnUnauthorizedForApi(OpenIdConnectOptions options)
+    {
+        var redirectToIdentityProvider = options.Events.OnRedirectToIdentityProvider;
+        options.Events.OnRedirectToIdentityProvider = async context =>
+        {
+            if (context.Request.Path.StartsWithSegments("/api"))
+            {
+                context.HandleResponse();
+                await EndpointHelpers.WriteErrorAsync(context.HttpContext, StatusCodes.Status401Unauthorized, "Authentication required.");
+                return;
+            }
+
+            await redirectToIdentityProvider(context);
+        };
+    }
+
+    /// <summary>
+    /// Appends a value to AzureAd:ClientCapabilities unless it's already there. Added as a
+    /// configuration source so every options type Microsoft.Identity.Web binds from the
+    /// section, including token acquisition's, sees it.
+    /// </summary>
+    internal static void AddClientCapability(IConfigurationBuilder configBuilder, IConfigurationSection azureAd, string capability)
+    {
+        var existing = azureAd.GetSection("ClientCapabilities").GetChildren().ToList();
+        if (existing.Any(c => string.Equals(c.Value, capability, StringComparison.OrdinalIgnoreCase))) return;
+
+        int next = existing.Select(c => int.TryParse(c.Key, out int i) ? i + 1 : 0).DefaultIfEmpty(0).Max();
+        configBuilder.AddInMemoryCollection(new Dictionary<string, string>
+        {
+            [azureAd.Path + ":ClientCapabilities:" + next] = capability
+        });
     }
 
     /// <summary>

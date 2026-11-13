@@ -17,8 +17,10 @@
 
     var MESSAGES = {
         network: { title: "Can't reach WebJEA.", text: 'Check your connection and try again.' },
-        session: { title: 'Your session has expired.', text: 'Reload the page to sign in again.' },
+        session: { title: 'Please sign in again.', text: 'Your session ended. Reload the page to sign in again.' },
         noaccess: { title: 'Not available.', text: "Either no matching commands exist or you don't have permission to use them." },
+        accesschanged: { title: 'Your access has changed.', text: 'You no longer have permission to run this command. Reload the page to see the commands available to you.' },
+        unverified: { title: "Couldn't verify your sign-in.", text: "WebJEA couldn't reach Microsoft Entra to confirm your access. Try again in a few minutes. If it keeps happening, give your WebJEA administrator the reference ID below." },
         server: { title: 'Something went wrong.', text: 'If it keeps happening, give your WebJEA administrator the reference ID below.' }
     };
 
@@ -36,9 +38,11 @@
     ApiError.prototype = Object.create(Error.prototype);
     ApiError.prototype.constructor = ApiError;
 
-    function kindForStatus(status) {
+    // Only for JSON bodies from WebJEA itself: a proxy's HTML 503 stays 'server'.
+    function kindForStatus(status, data) {
         if (status === 401) return 'session';
-        if (status === 403) return 'noaccess';
+        if (status === 403) return data && data.reason === 'accesschanged' ? 'accesschanged' : 'noaccess';
+        if (status === 503) return 'unverified';
         return 'server';
     }
 
@@ -64,7 +68,7 @@
 
             if (!response.ok) {
                 var message = data.error || data.statusmessage || ('Request failed: ' + response.status);
-                throw new ApiError(kindForStatus(response.status), response.status, message, data);
+                throw new ApiError(kindForStatus(response.status, data), response.status, message, data);
             }
 
             return data;
@@ -158,7 +162,8 @@
         var msg = MESSAGES[kind];
 
         var div = document.createElement('div');
-        div.className = 'alert webjea-alert ' + (kind === 'noaccess' || kind === 'session' ? 'alert-warning' : 'alert-danger');
+        var warning = kind === 'noaccess' || kind === 'session' || kind === 'accesschanged';
+        div.className = 'alert webjea-alert ' + (warning ? 'alert-warning' : 'alert-danger');
         div.setAttribute('role', 'alert');
         div.setAttribute('data-kind', kind);
 
@@ -176,7 +181,7 @@
         }
 
         // Not shown for noaccess: an empty menu has no request ID, and the two must look alike.
-        if (kind === 'server' && err && err.requestId) {
+        if ((kind === 'server' || kind === 'unverified') && err && err.requestId) {
             var ref = document.createElement('div');
             ref.className = 'webjea-alert-ref small mt-1';
             ref.textContent = 'Reference: ' + err.requestId;
@@ -184,9 +189,9 @@
         }
 
         var actions = document.createElement('div');
-        if (kind === 'session') {
+        if (kind === 'session' || kind === 'accesschanged') {
             actions.appendChild(button('Reload', function () { global.location.reload(); }));
-        } else if ((kind === 'network' || kind === 'server') && typeof opts.retry === 'function') {
+        } else if ((kind === 'network' || kind === 'server' || kind === 'unverified') && typeof opts.retry === 'function') {
             actions.appendChild(button('Try again', opts.retry));
         }
         if (opts.dashboardLink) {
