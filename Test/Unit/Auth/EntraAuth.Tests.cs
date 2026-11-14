@@ -1,13 +1,17 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.Graph.Models.ODataErrors;
 using Microsoft.Identity.Client;
+using Microsoft.Identity.Web;
 using WebJEA;
 using WebJEA.Auth;
 using WebJEA.Auth.Entra;
@@ -776,6 +780,170 @@ public class EntraRegistrationTests
 
         Assert.False(HasRevalidator(builder));
         Assert.Empty(builder.Configuration.GetSection("AzureAd:ClientCapabilities").GetChildren());
+    }
+
+    [Fact]
+    public async Task DefaultScheme_ForwardsBearerToJwt_AndTheRestToOidc()
+    {
+        using var services = Build(new Dictionary<string, string>()).Services.BuildServiceProvider();
+        var schemes = services.GetRequiredService<IAuthenticationSchemeProvider>();
+
+        Assert.Equal(EntraAuthExtensions.PolicyScheme, (await schemes.GetDefaultAuthenticateSchemeAsync())?.Name);
+        Assert.NotNull(await schemes.GetSchemeAsync(JwtBearerDefaults.AuthenticationScheme));
+        Assert.NotNull(await schemes.GetSchemeAsync(OpenIdConnectDefaults.AuthenticationScheme));
+
+        var policy = services.GetRequiredService<IOptionsMonitor<PolicySchemeOptions>>().Get(EntraAuthExtensions.PolicyScheme);
+        var bearer = new DefaultHttpContext();
+        bearer.Request.Headers.Authorization = "Bearer abc";
+        Assert.Equal(JwtBearerDefaults.AuthenticationScheme, policy.ForwardDefaultSelector(bearer));
+        Assert.Equal(OpenIdConnectDefaults.AuthenticationScheme, policy.ForwardDefaultSelector(new DefaultHttpContext()));
+    }
+
+    [Fact]
+    public void GraphTokens_AreAcquiredWithTheOidcSchemeOptions()
+    {
+        // Without this, token acquisition looks for options under the policy scheme and every
+        // revalidation fails as unavailable
+        using var services = Build(new Dictionary<string, string> { ["AzureAd:ClientSecret"] = "s3cr3t" }).Services.BuildServiceProvider();
+
+        var graph = services.GetRequiredService<IOptions<GraphServiceClientOptions>>().Value;
+
+        Assert.Equal(OpenIdConnectDefaults.AuthenticationScheme, graph.AcquireTokenOptions.AuthenticationOptionsName);
+    }
+}
+
+public class EntraPrincipalTests
+{
+    private const string AppId = "aaaaaaaa-1111-2222-3333-444444444444";
+
+    internal static ClaimsPrincipal AppOnlyPrincipal(params Claim[] extra)
+    {
+        var claims = new List<Claim>
+        {
+            new Claim("azp", AppId, null, "https://login.microsoftonline.com/t/v2.0"),
+            new Claim("tid", "eeeeeeee-1111-2222-3333-444444444444"),
+            new Claim("oid", "bbbbbbbb-1111-2222-3333-444444444444"),
+            new Claim("roles", "WebJEA.Automation")
+        };
+        claims.AddRange(extra);
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestBearer"));
+        EntraPrincipal.MarkAppOnly(principal);
+        return principal;
+    }
+
+    [Fact]
+    public void MarkAppOnly_MarksAndNamesTheApp()
+    {
+        var principal = AppOnlyPrincipal();
+
+        Assert.True(EntraPrincipal.IsAppOnly(principal));
+        Assert.Equal("app:" + AppId, principal.Identity?.Name);
+    }
+
+    [Fact]
+    public void MarkerClaimFromToken_IsNotTrusted()
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
+        {
+            new Claim(EntraPrincipal.AppOnlyClaimType, "true", null, "https://login.microsoftonline.com/t/v2.0")
+        }, "TestBearer"));
+
+        Assert.False(EntraPrincipal.IsAppOnly(principal));
+    }
+
+    [Fact]
+    public void MarkAppOnly_ReplacesMarkerClaimFromToken()
+    {
+        var principal = AppOnlyPrincipal(new Claim(EntraPrincipal.AppOnlyClaimType, "forged", null, "https://evil.example"));
+
+        var marker = Assert.Single(principal.FindAll(EntraPrincipal.AppOnlyClaimType));
+        Assert.Equal(ClaimsIdentity.DefaultIssuer, marker.Issuer);
+    }
+
+    [Fact]
+    public void SignedInUser_IsNotAppOnly()
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("preferred_username", "user@contoso.com") }, "TestEntra"));
+
+        Assert.False(EntraPrincipal.IsAppOnly(principal));
+        Assert.False(EntraPrincipal.IsAppOnly(null));
+    }
+
+    [Theory]
+    [InlineData("scp")]
+    [InlineData("http://schemas.microsoft.com/identity/claims/scope")]
+    public void ScopeClaim_IsDelegated(string claimType)
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(claimType, "user_impersonation") }, "TestBearer"));
+
+        Assert.True(EntraPrincipal.HasDelegatedScopes(principal));
+        Assert.False(EntraPrincipal.HasDelegatedScopes(AppOnlyPrincipal()));
+    }
+
+    [Fact]
+    public void AppId_FallsBackToV1AppIdClaim()
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("appid", AppId) }, "TestBearer"));
+
+        Assert.Equal(AppId, EntraPrincipal.AppId(principal));
+    }
+
+    [Fact]
+    public void UserContext_AppOnly_UsesAppNameRolesAndObjectId()
+    {
+        var ctx = new EntraUserContext(AppOnlyPrincipal(), null);
+
+        Assert.Equal("app:" + AppId, ctx.UserName);
+        Assert.True(ctx.IsMemberOf("webjea.automation"));
+        Assert.True(ctx.IsMemberOf("bbbbbbbb-1111-2222-3333-444444444444"));
+        Assert.DoesNotContain("app:" + AppId, ctx.MemberOfIds);
+        Assert.Equal("-", ctx.OrgName);
+    }
+
+    private class CountingGraphGroupLoader : GraphGroupLoader
+    {
+        public int Lookups { get; private set; }
+
+        public CountingGraphGroupLoader() : base(null) { }
+
+        public override string FindGroupIdByDisplayName(string displayName)
+        {
+            Lookups++;
+            return "";
+        }
+
+        public override GroupLookup LoadTransitiveGroupIdsForRevalidation()
+        {
+            Lookups++;
+            return new GroupLookup(GroupLookupStatus.SignInRequired, Array.Empty<string>(), "user_null");
+        }
+    }
+
+    [Fact]
+    public void GroupResolver_AppOnlyRequest_SkipsGraphLookup()
+    {
+        var loader = new CountingGraphGroupLoader();
+        var accessor = new HttpContextAccessor { HttpContext = new DefaultHttpContext { User = AppOnlyPrincipal() } };
+        var services = new ServiceCollection().AddSingleton<GraphGroupLoader>(loader).AddSingleton<IHttpContextAccessor>(accessor).BuildServiceProvider();
+        var resolver = new EntraGroupResolver(new ConfigurationBuilder().Build(), services);
+
+        Assert.Equal("my admins", resolver.GetSID("My Admins"));
+        Assert.Equal(0, loader.Lookups);
+    }
+
+    [Fact]
+    public async Task Revalidator_AppOnly_IsValidWithoutGraphOrSignOut()
+    {
+        var loader = new CountingGraphGroupLoader();
+        var config = new ConfigurationBuilder().Build();
+        var revalidator = new EntraRevalidator(loader, new RevalidationCache(new MemoryCache(new MemoryCacheOptions()), config), config);
+        var context = new DefaultHttpContext { User = AppOnlyPrincipal() };
+
+        var result = await revalidator.RevalidateAsync(context);
+
+        Assert.Equal(RevalidationStatus.Valid, result.Status);
+        Assert.True(result.User.IsMemberOf("webjea.automation"));
+        Assert.Equal(0, loader.Lookups);
     }
 }
 

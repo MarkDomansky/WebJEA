@@ -144,6 +144,8 @@ WebJEA logs which credential it found at startup (`Entra: Graph client credentia
 
 Any of these can also be set as environment variables using `__` separators, which is how the [Docker images](docker.md) are configured. `ClientCredentials` entries are numbered from `0` (e.g. `AzureAd__ClientCredentials__0__SourceType=Path`), and a secret is `AzureAd__ClientSecret`. Keep client secrets, PFX files and PFX passwords out of version control.
 
+Scripts and services can call WebJEA's API with app-only access tokens alongside browser sign-in; there's nothing to turn on in WebJEA. The tokens must be issued for WebJEA's client ID (`api://<client-id>`) and carry an app role; see [API access](api.md). If you set a custom Application ID URI (e.g. `https://webjea.contoso.com`) instead of the default `api://<client-id>`, add it as `AzureAd:Audience`.
+
 The `AzureAd` section name comes from Microsoft.Identity.Web, the library WebJEA uses for sign-in, and matches Microsoft's own documentation and samples.
 
 ## Group overage (users in more than 200 groups)
@@ -171,6 +173,7 @@ Limitations:
 - **The menu and command pages** use the groups from the user's last revalidation while it's cached, and otherwise use the token. They don't call Graph themselves.
 - **After WebJEA restarts**, the first script run asks every user to sign in again, because tokens are cached in memory. Reload signs them back in without a prompt.
 - **Without a client credential**, or with `EnableGraph: false`, there is no check. Startup logs `Entra: sign-in revalidation before execute is off`.
+- **Apps calling the [API](api.md)** with app-only tokens aren't checked: there's no user to look up. Removing an app's role or credential takes effect when its current token expires, usually within 60–90 minutes.
 
 ## Switching from Windows mode
 
@@ -178,7 +181,7 @@ By default, Windows-style `PermittedGroups` entries never match in Entra mode. T
 
 ## WEBJEAUSERNAME
 
-In Entra mode, scripts receive the **UPN** (`user@tenant.com`) in `WEBJEAUSERNAME` instead of `DOMAIN\user`. Audit logs use the same value.
+In Entra mode, scripts receive the **UPN** (`user@tenant.com`) in `WEBJEAUSERNAME` instead of `DOMAIN\user`. Audit logs use the same value. When an app calls the [API](api.md) with an app-only token, the value is `app:<client-id>` of the calling app registration.
 
 If your scripts parse `DOMAIN\user`, update them before switching to Entra mode.
 
@@ -200,6 +203,7 @@ Entra errors are written to the WebJEA log. Most authorization problems show up 
 | `AADSTS700027: The certificate with identifier used to sign the client assertion is not registered on application` | The certificate WebJEA loaded isn't uploaded to the app registration, e.g. a renewed certificate whose `.cer` wasn't uploaded. | Upload the `.cer` under **Certificates & secrets** → **Certificates** ([Step 4, Option A](entra-appreg.md#option-a-certificate-recommended)). |
 | `EntraUserContext: group overage detected ... EnableGraph is false` | Graph is turned off, so the token can carry only a limited number of groups. A user in more than ~200 groups gets no `groups` claim. With Graph off, sign-in can also fall back to the implicit flow, where Entra sends a `hasgroups` marker instead of the groups once a user is in more than **5** groups. | Set `EnableGraph: true` (the default) and complete [App registration Steps 4–5](entra-appreg.md#step-4-add-a-client-credential) (client credential and Graph permission), then have affected users sign out and back in. |
 | `EntraGroupResolver: '<entry>' is not a GUID; matching it as an app role value or UPN.` (Trace) | Informational. If `<entry>` was meant to be a group, it didn't resolve. | Use the group's object ID. Windows-style entries never match; see [Switching from Windows mode](#switching-from-windows-mode). |
+| `Entra: bearer token rejected for <path>: <reason>` (Info) | A script or service called the API with a token WebJEA doesn't accept: no WebJEA app role, wrong audience, expired, or a user token. | See [API access: Troubleshooting](api.md#troubleshooting). |
 | Users see "Not available" instead of a menu; the log shows `API: Menu empty for <user>: permitted on 0 of N commands` | The user's token has none of the `PermittedGroups` entries. | Check that the groups claim is configured ([Step 3](entra-appreg.md#step-3-add-the-groups-claim)) and that the user signed in again after the change. With [advanced options](entra-advanced.md), also check assignments on the enterprise application and that the user is a **direct** member of any assigned group. |
 
 ## Related

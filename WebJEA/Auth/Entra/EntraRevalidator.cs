@@ -31,6 +31,14 @@ public class EntraRevalidator : IUserRevalidator
         var principal = context.User;
         var signInUser = EntraUserContext.FromTokenOnly(principal);
 
+        // An app-only bearer token has no user to look up in Graph; it was validated on this
+        // request and an app's access ends when its token expires.
+        if (EntraPrincipal.IsAppOnly(principal))
+        {
+            dlog.Trace("Entra: " + signInUser.UserName + " is an app-only caller; no sign-in revalidation.");
+            return new RevalidationResult(RevalidationStatus.Valid, signInUser, signInUser);
+        }
+
         if (_cache.TryGet(principal, out var cached))
         {
             return new RevalidationResult(RevalidationStatus.Valid, EntraUserContext.FromGraphGroups(principal, cached), signInUser);

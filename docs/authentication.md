@@ -17,6 +17,7 @@ WebJEA supports two authentication modes, selected by `Authentication:Mode` in `
 
 - [Windows mode](windows.md) — Kerberos/NTLM via Negotiate on Kestrel, SPN requirements, AD group resolution
 - [Entra ID mode](entra.md) — OIDC sign-in, group object IDs, app roles, Microsoft Graph integration
+- [API access](api.md) — Scripts and services calling WebJEA without a user: Windows credentials or app-only Entra tokens
 - [Development auto-login](dev.md) — Local development without an identity provider
 
 ## Linux containers

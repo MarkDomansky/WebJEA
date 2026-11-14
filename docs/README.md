@@ -21,6 +21,7 @@ WebJEA dynamically builds web forms for any PowerShell script — parsing the sc
 * [Entra ID mode](entra.md) — OIDC sign-in, authorizing by groups, users, and app roles
 * [Entra App Registration](entra-appreg.md) — step-by-step portal setup for Entra ID mode
 * [Advanced Entra Options](entra-advanced.md) — app roles, groups assigned to the application, required assignment
+* [API access](api.md) — calling WebJEA from scripts and services: app-only Entra tokens, Windows credentials, endpoint reference
 * [Development auto-login](dev.md) — local testing without an identity provider
 
 ## Scripts

@@ -2,7 +2,7 @@
 
 WebJEA needs one app registration in your Entra ID tenant. This page walks through creating it. All five steps are required.
 
-App roles, groups assigned to the application, and required assignment need extra steps that are covered in [Advanced Entra Options](entra-advanced.md). Do those after this page.
+App roles, groups assigned to the application, and required assignment need extra steps that are covered in [Advanced Entra Options](entra-advanced.md). Do those after this page. To let scripts and services call WebJEA's API without a user, also follow [API access for automation](#optional-api-access-for-automation-app-only) at the end of this page.
 
 > [!TIP]
 > You can reuse one registration across environments (dev, staging, production) by adding one redirect URI per host.
@@ -26,6 +26,9 @@ Write these down as you go. They go into `appsettings.Production.json` (or envir
 | Application (client) ID | [Step 1](#step-1-create-the-app-registration), **Overview** page | `appsettings.Production.json` `AzureAd:ClientId` |
 | Client credential: certificate subject (recommended) **or** client secret **Value** | [Step 4](#step-4-add-a-client-credential) | `appsettings.Production.json` `AzureAd:ClientCredentials` (certificate) or `AzureAd:ClientSecret` |
 | Group object IDs | **Entra ID** → **Groups** → the group → **Overview** → **Object ID** | `webjea.json` `PermittedGroups` |
+| Automation only: Application ID URI, e.g. `api://<client-id>` | [Automation step 1](#optional-api-access-for-automation-app-only) | The client's token request (`scope=api://<client-id>/.default`) |
+| Automation only: app role value, e.g. `WebJEA.Automation` | [Automation step 2](#optional-api-access-for-automation-app-only) | `webjea.json` `PermittedGroups` |
+| Automation only: the **client** app's tenant ID, client ID and credential | [Automation step 3](#optional-api-access-for-automation-app-only) | The calling script or service ([API access](api.md)), never WebJEA's config |
 
 ## Step 1: Create the app registration
 
@@ -144,3 +147,45 @@ WebJEA uses Graph, authenticating with the credential from [Step 4](#step-4-add-
 ## Next
 
 Put the values you collected into WebJEA's configuration. See [Configure WebJEA](entra.md#configure-webjea).
+
+## Optional: API access for automation (app-only)
+
+Scripts, scheduled tasks and pipelines can call WebJEA's API as **themselves**, with no user signed in. Each caller gets its own **client** app registration, and Entra issues it an app-only token through the client credentials flow. WebJEA accepts these tokens alongside browser sign-in, with no WebJEA configuration change. A caller's token must carry an **app role** from WebJEA's registration, and that role value goes in `PermittedGroups` like any other entry. To call the API once this is set up, see [API access](api.md).
+
+Steps 1 and 2 change the **WebJEA** app registration and are done once. Steps 3–5 are repeated for each calling app.
+
+1. **Set the Application ID URI.** In the WebJEA app registration, go to **Expose an API** → **Application ID URI** → **Add** (or **Set**), accept the default `api://<client-id>`, and click **Save**. Callers request tokens for `api://<client-id>/.default`. You don't need to add a scope: scopes are for user (delegated) tokens, which WebJEA's API doesn't accept.
+
+2. **Create an app role for applications.** Go to **App roles** → **+ Create app role**:
+   - **Display name**: e.g., "WebJEA Automation".
+   - **Allowed member types**: **Applications** (or **Both (Users/Groups + Applications)** to reuse a role you already give users, see [App roles](entra-advanced.md#app-roles)).
+   - **Value**: e.g., `WebJEA.Automation`. This exact string goes in `PermittedGroups`. If you've set an [`AppRolePrefix`](entra-advanced.md#set-the-app-role-prefix), start the value with it.
+   - **Description**: e.g., "Unattended callers of the WebJEA API".
+   - Click **Apply**.
+
+   Create more roles if different callers should run different commands, e.g. `WebJEA.Automation.HR`.
+
+3. **Create the client app registration.** Go to **App registrations** → **+ New registration**, name it after the caller (e.g., "Payroll sync → WebJEA"), leave it single tenant with **no** redirect URI, and click **Register**. Copy its **Application (client) ID**. Then add a credential under **Certificates & secrets**, as in [Step 4](#step-4-add-a-client-credential): a certificate is recommended, and the calling machine holds its private key. This credential belongs to the caller; WebJEA never sees it.
+
+4. **Give the client the role.** In the **client** registration, go to **API permissions** → **+ Add a permission** → **APIs my organization uses**, search for the WebJEA app, select **Application permissions**, check the role (e.g. `WebJEA.Automation`), and click **Add permissions**. Then click **Grant admin consent for [Your Tenant]** and confirm the green check. Until consent is granted, the client's tokens carry no `roles` claim and WebJEA rejects them.
+
+5. **Permit the role in `webjea.json`.** Add the role value to the `PermittedGroups` of each command the caller may run, or to the global `PermittedGroups` to allow every command:
+
+   ```json
+   {
+     "Id": "payroll-sync",
+     "Script": "payroll-sync.ps1",
+     "PermittedGroups": [ "<hr-group-object-id>", "WebJEA.Automation" ]
+   }
+   ```
+
+   > [!WARNING]
+   > A command whose `PermittedGroups` contains `*` is open to **every** caller with **any** WebJEA app role, as well as to every signed-in user. Give commands that automation must not reach an explicit list.
+
+How app callers differ from users:
+
+> [!NOTE]
+>
+> - Entra issues app-only tokens to any app in the tenant that asks, but a token with no WebJEA app role is rejected (HTTP 401). Setting **Assignment required?** ([Require assignment](entra-advanced.md#require-assignment)) doesn't affect app callers that were granted a role.
+> - Removing the role, or deleting the client's credential, takes effect when the caller's current token expires, usually within 60–90 minutes. App callers aren't [revalidated](entra.md#near-real-time-revocation) before each script run.
+> - Scripts see the caller as `app:<client-id>` in `WEBJEAUSERNAME` ([WEBJEAUSERNAME](entra.md#webjeausername)).
