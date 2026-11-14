@@ -327,6 +327,52 @@ begin
         }
     }
 
+    function Step_FolderAccess([string]$Path, [string]$Account, [string]$Sid,
+        [ValidateSet('Read', 'ReadAndExecute', 'Modify')][string]$Rights, [string]$Label)
+    {
+        #Makes sure the service account can use a folder, and changes nothing else: the
+        #admin's permission scheme (inheritance, other entries) is theirs. Access the
+        #account already has through a built-in group that always contains it counts, so
+        #a default install - where Users can read most of C:\ - gets no extra entry.
+        #Only Allow entries that cover the folder AND everything below it count (container
+        #and object inherit, no propagation limits), because Kestrel/NLog need the files,
+        #not just the folder. Compared by SID, like the private-key step.
+        $holderSids = @($Sid,
+            'S-1-1-0',      #Everyone
+            'S-1-5-11',     #Authenticated Users
+            'S-1-5-32-545', #Users (contains Authenticated Users by default)
+            'S-1-5-6')      #Service (in every service process token)
+        $needed = [int][System.Security.AccessControl.FileSystemRights]$Rights
+        $icaclsRights = @{ Read = 'R'; ReadAndExecute = 'RX'; Modify = 'M' }[$Rights]
+        $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+        $hasAccess = {
+            if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return $false }
+            $rules = (Get-Acl -LiteralPath $Path).GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])
+            return [bool]($rules | Where-Object {
+                    $_.AccessControlType -eq 'Allow' -and
+                    $holderSids -contains $_.IdentityReference.Value -and
+                    ($_.InheritanceFlags -band $inherit) -eq $inherit -and
+                    $_.PropagationFlags -eq 'None' -and
+                    ([int]$_.FileSystemRights -band $needed) -eq $needed
+                })
+        }.GetNewClosure()
+        @{
+            Description = "$Account has $Label access to $Path"
+            TestScript  = { & $hasAccess }.GetNewClosure()
+            SetScript   = {
+                #A folder created here (LogPath on a first install) may already be covered
+                #by what it inherits; only add an entry when it is not.
+                if (-not (Test-Path -LiteralPath $Path)) { New-Item -Path $Path -ItemType Directory -Force | Out-Null }
+                if (& $hasAccess) { return }
+                #icacls /grant adds one entry and leaves inheritance and every other entry
+                #exactly as they were. Set-Acl would rewrite the whole descriptor, and on
+                #folders it can demand SeSecurityPrivilege.
+                & icacls.exe $Path /grant "*${Sid}:(OI)(CI)($icaclsRights)" | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw "icacls.exe failed with exit code $LASTEXITCODE granting $Account $Label access to $Path." }
+            }.GetNewClosure()
+        }
+    }
+
     function GetSteps_AppConfig($Settings)
     {
         ##################################################
@@ -402,7 +448,6 @@ begin
             -XPath "//*[local-name()='target'][@name='fileSummary']/*[local-name()='target']" `
             -Name 'fileName' -Value "$($settings.LogPath)\$($settings.LogUsageFile)" `
             -Label 'Setting usage log file location in nlog.config'
-        #TODO assign permissions to scripts folder?
     }
 
     function GetSteps_Server
@@ -453,6 +498,15 @@ begin
             }.GetNewClosure()
         }
 
+        #What the service account needs on the folders this script owns: run the site,
+        #read the scripts, write the logs (NLog creates, appends and archives). Nothing is
+        #ever removed; broad access is reported by ValidateSettings instead. Resolved to a
+        #SID here so an unresolvable account fails before anything has been changed.
+        $svcAccount = $settings.ServiceUserName
+        $svcSid = (ResolveAccountSid -Account $svcAccount).Value
+        Step_FolderAccess -Path $settings.SitePath -Account $svcAccount -Sid $svcSid -Rights 'ReadAndExecute' -Label 'read & execute'
+        Step_FolderAccess -Path $settings.ScriptsPath -Account $svcAccount -Sid $svcSid -Rights 'ReadAndExecute' -Label 'read & execute'
+        Step_FolderAccess -Path $settings.LogPath -Account $svcAccount -Sid $svcSid -Rights 'Modify' -Label 'modify'
     }
     function GetSteps_Service($Settings)
     {
@@ -789,7 +843,7 @@ begin
         }
         catch
         {
-            throw "Could not resolve service account '$Account' to a SID, so its access to the certificate's private key cannot be checked or granted. Verify the account exists and that this machine can reach its domain."
+            throw "Could not resolve service account '$Account' to a SID, so its rights, folder access and certificate key access cannot be checked or granted. Verify the account exists and that this machine can reach its domain."
         }
     }
 
@@ -865,6 +919,71 @@ begin
             return @($chain.ChainStatus | ForEach-Object { "$($_.Status): $($_.StatusInformation.Trim())" })
         }
         finally { $chain.Dispose() }
+    }
+
+    function GetBroadAccessWarnings([string]$Path, [string]$Label, [switch]$WarnOnRead)
+    {
+        #Deploy only ever ADDS what the service account needs; it does not take over a
+        #folder's permissions. What it can do is say when a folder is open to everyone on
+        #the box: write access there lets any signed-in user change what WebJEA runs (a
+        #DLL next to WebJEA.exe, a script) or what it serves, and read access exposes any
+        #secret stored in it. Inherit-only entries count too - Windows Server's default
+        #"Users can create files in subfolders" comes through as one. Returns one message,
+        #or nothing.
+        #A folder that doesn't exist yet will inherit from its nearest existing parent, so
+        #judge it by the parent's entries that a new subfolder would inherit.
+        $target = $Path
+        $inheritedFrom = $null
+        while (-not (Test-Path -LiteralPath $target -PathType Container))
+        {
+            $parent = Split-Path -Path $target -Parent
+            if ([string]::IsNullOrEmpty($parent) -or $parent -eq $target) { return }
+            $target = $parent
+            $inheritedFrom = $parent
+        }
+
+        $broadSids = @{
+            'S-1-1-0'      = 'Everyone'
+            'S-1-5-7'      = 'Anonymous Logon'
+            'S-1-5-11'     = 'Authenticated Users'
+            'S-1-5-4'      = 'Interactive'
+            'S-1-5-32-545' = 'Users'
+            'S-1-5-32-546' = 'Guests'
+        }
+        #FileSystemRights is a signed int; the generic bits are spelled out because a few
+        #in-box entries (CREATOR OWNER and friends) are stored that way rather than mapped.
+        $genericAll = 0x10000000
+        $genericWrite = 0x40000000
+        $genericRead = [int]::MinValue #0x80000000
+        $writeMask = [int]([System.Security.AccessControl.FileSystemRights]'WriteData, AppendData, Delete, DeleteSubdirectoriesAndFiles, ChangePermissions, TakeOwnership') -bor $genericAll -bor $genericWrite
+        $readMask = [int][System.Security.AccessControl.FileSystemRights]::ReadData -bor $genericAll -bor $genericRead
+
+        $found = [ordered]@{}
+        foreach ($rule in (Get-Acl -LiteralPath $target).GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+        {
+            if ($rule.AccessControlType -ne 'Allow') { continue }
+            if ($inheritedFrom -and -not ($rule.InheritanceFlags -band [System.Security.AccessControl.InheritanceFlags]::ContainerInherit)) { continue }
+            $sid = $rule.IdentityReference.Value
+            $name = $broadSids[$sid]
+            #Domain Users is per-domain (S-1-5-21-<domain>-513), so match it by suffix.
+            if (-not $name -and $sid -match '^S-1-5-21-.+-513$') { $name = 'Domain Users' }
+            if (-not $name) { continue }
+
+            $rights = [int]$rule.FileSystemRights
+            $kind = $null
+            if ($rights -band $writeMask) { $kind = 'write' }
+            elseif ($WarnOnRead -and ($rights -band $readMask)) { $kind = 'read' }
+            if (-not $kind) { continue }
+            #Keep the strongest finding per group: write beats read.
+            if ($found[$name] -ne 'write') { $found[$name] = $kind }
+        }
+        if ($found.Count -eq 0) { return }
+
+        $where = if ($inheritedFrom) { "$Label '$Path' (not created yet; it will inherit from '$inheritedFrom')" } else { "$Label '$Path'" }
+        $list = ($found.Keys | ForEach-Object { "$_ ($($found[$_]))" }) -join ', '
+        $why = if ($found.Values -contains 'write') { 'Any signed-in user in these groups could change what WebJEA runs or serves.' }
+        else { 'Any signed-in user in these groups could read the secrets stored there.' }
+        return "$where grants access to broad groups: $list. $why See docs/System-Requirements.md#folder-permissions to restrict it."
     }
 
     function ValidateSettings( [psobject]$Settings )
@@ -950,6 +1069,31 @@ begin
         Assert ($settings.SitePath -ne $settings.ScriptsPath) 'SitePath and ScriptsPath cannot be the same. Please update the settings file to specify different paths.'
         Assert ($settings.SitePath -ne $settings.LogPath) 'SitePath and LogPath cannot be the same. Please update the settings file to specify different paths.'
         Assert ($settings.LogFile -ne $settings.LogUsageFile) 'LogFile and LogUsageFile cannot be the same. Please update the settings file to specify different paths.'
+
+        #Folder access: the Server section only adds what the service account lacks, so
+        #folders left open to every user (the default under C:\) are reported here rather
+        #than changed. Reading SitePath only matters once a secret is stored there.
+        $appSettingsPath = "$($settings.SitePath)\appsettings.Production.json"
+        $siteHasSecret = $false
+        if (Test-Path -LiteralPath $appSettingsPath -PathType Leaf)
+        {
+            $appSettings = $null
+            try { $appSettings = Get-Content -LiteralPath $appSettingsPath -Raw | ConvertFrom-Json } catch {}
+            if ($appSettings -and $appSettings.PSObject.Properties['AzureAd'])
+            {
+                $siteHasSecret = -not [string]::IsNullOrEmpty([string]$appSettings.AzureAd.ClientSecret)
+            }
+        }
+        $folderChecks = @(
+            @{ Label = 'SitePath'; Path = $settings.SitePath; WarnOnRead = $siteHasSecret }
+            @{ Label = 'ScriptsPath'; Path = $settings.ScriptsPath; WarnOnRead = $false }
+            @{ Label = 'LogPath'; Path = $settings.LogPath; WarnOnRead = $false }
+        )
+        foreach ($check in $folderChecks)
+        {
+            $warning = GetBroadAccessWarnings -Path $check.Path -Label $check.Label -WarnOnRead:$check.WarnOnRead
+            if ($warning) { Write-Warning $warning }
+        }
 
         #Host names: one list, explicit names only. SiteFQDN/SecondarySiteFQDNs were never
         #treated differently downstream (allowed hosts, SPNs, cert coverage, smoke probe all

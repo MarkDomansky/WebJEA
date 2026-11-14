@@ -19,7 +19,7 @@ For Docker, or migrating an existing IIS install, see the [deployment guide](dep
    Add `-TestOnly` to see what would change without changing it, or restrict the run with `-OnlySections Server,Service,WebJEA,Finalize`. If `HttpPort` is enabled without `HttpsPort` — an intentional HTTP-only install — add `-AllowHttpWithoutRedirect` to confirm HTTP will be served with no redirect to HTTPS.
 6. Browse to `https://<one of your SiteFQDNs>/`. By default, machine local administrators have access to the starter page, which executes a demo script exercising the major features of WebJEA so you can verify everything works.
 
-`Deploy.ps1` copies the site files, creates and starts the Windows service, writes the production configuration, grants the service account read access to the certificate's private key, opens firewall ports, verifies Kerberos SPNs, and smoke-tests every configured binding — the [deployment guide](deployment-migration.md) describes each step in detail.
+`Deploy.ps1` copies the site files, creates and starts the Windows service, writes the production configuration, grants the service account the [folder access](System-Requirements.md#folder-permissions) it needs and read access to the certificate's private key, opens firewall ports, verifies Kerberos SPNs, and smoke-tests every configured binding — the [deployment guide](deployment-migration.md) describes each step in detail. It warns, without changing anything, when the site, scripts or log folder is open to every user on the server.
 
 While not strictly required, running Windows updates after deployment is always a good idea.
 

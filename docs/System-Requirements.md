@@ -53,3 +53,36 @@ There are no firm requirements beyond the Microsoft recommendations for your Win
 ## Disk
 
 The application itself is a few hundred MB (self-contained .NET plus the embedded PowerShell engine). Beyond that, disk usage is driven by your scripts and log files.
+
+### Folder permissions
+
+The service account needs this access to the folders in the settings file:
+
+| Folder | Access | Why |
+|---|---|---|
+| `SitePath` | Read & execute | Runs `WebJEA.exe` and reads its configuration. WebJEA writes nothing here. |
+| `ScriptsPath` | Read & execute | Reads `webjea.json` and the scripts. Scripts that write files need more, on the folders they write to. |
+| `LogPath` | Modify | Creates, appends to and archives the log files. |
+
+`Deploy.ps1` grants only what is missing, and never removes an entry or changes inheritance. Access the account already has through Everyone, Authenticated Users, Users or Service counts, so a default install usually gets a new entry on `LogPath` only.
+
+Because `Deploy.ps1` leaves your permissions alone, it **warns** when one of these folders is open to everyone on the server instead:
+
+* **Write access for a broad group** (Everyone, Authenticated Users, Users, Interactive, Guests, Domain Users) on any of the three. Anyone who can sign in to the server could then change what WebJEA runs: drop a DLL next to `WebJEA.exe`, or edit a script that runs as the service account. Folders created under `C:\` get this by default: Windows Server lets Users create files in subfolders, and Windows 10/11 gives Authenticated Users Modify.
+* **Read access for a broad group** on `SitePath`, once `appsettings.Production.json` holds a secret (for example `AzureAd:ClientSecret`).
+
+To restrict a folder, turn off inheritance and grant only SYSTEM, Administrators and the service account. The well-known SIDs make this work on non-English Windows too:
+
+```powershell
+$account = 'DOMAIN\gmsa1$'
+$sid = ([System.Security.Principal.NTAccount]$account).Translate([System.Security.Principal.SecurityIdentifier]).Value
+$folders = [ordered]@{ 'C:\webjea\site' = 'RX'; 'C:\webjea\scripts' = 'RX'; 'C:\webjea\logs' = 'M' }
+foreach ($folder in $folders.GetEnumerator())
+{
+    # SYSTEM and Administrators get full control; the service account gets what the table above lists
+    icacls $folder.Key /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)(F)' '*S-1-5-32-544:(OI)(CI)(F)' "*${sid}:(OI)(CI)($($folder.Value))"
+}
+```
+
+> [!NOTE]
+> `/inheritance:r` removes every entry the folder inherited, including access you granted on a parent folder such as `C:\webjea`. Entries added directly to the folder, such as a group of script authors on `ScriptsPath`, are kept. Grant anything else on the folder itself; `Deploy.ps1` leaves those entries alone.
