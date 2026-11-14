@@ -39,6 +39,13 @@ public class EntraGroupResolver : IGroupResolver
         return input.Contains('\\');
     }
 
+    // Graph lookups use the signed-in user's token; an app-only caller has none, and has no
+    // groups for a display name to match anyway
+    private bool IsAppOnlyRequest()
+    {
+        return EntraPrincipal.IsAppOnly(_services.GetService<IHttpContextAccessor>()?.HttpContext?.User);
+    }
+
     public string GetSID(string input)
     {
         if (input == "*") return "*";
@@ -48,7 +55,7 @@ public class EntraGroupResolver : IGroupResolver
             return groupId.ToString(); // normalized lowercase GUID
         }
 
-        if (_resolveNames && !UpnPattern.IsMatch(input) && !IsWindowsStyle(input) && !IsAppRole(input))
+        if (_resolveNames && !UpnPattern.IsMatch(input) && !IsWindowsStyle(input) && !IsAppRole(input) && !IsAppOnlyRequest())
         {
             var loader = _services.GetService<GraphGroupLoader>();
             if (loader != null)

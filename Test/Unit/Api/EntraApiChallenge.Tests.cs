@@ -7,6 +7,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using Newtonsoft.Json.Linq;
 using Xunit;
 
 namespace WebJEA.Tests.Api;
@@ -25,7 +26,7 @@ public class EntraUnauthenticatedFactory : WebJeaApiFactory
     {
     }
 
-    protected EntraUnauthenticatedFactory(string pathBase) : base(null, "Domain Admins")
+    protected EntraUnauthenticatedFactory(string pathBase, Action<JObject> customizeConfig = null) : base(customizeConfig, "Domain Admins")
     {
         _pathBase = pathBase;
     }

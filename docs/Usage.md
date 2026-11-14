@@ -56,5 +56,5 @@ Every `webjea.log` line includes the request ID, so you can search the log for t
 ## Writing scripts
 
 * Scripts execute under **PowerShell 7** in the context of the WebJEA service account — see [powershell7.md](powershell7.md) for compatibility notes.
-* The current user is injected as `WEBJEAUSERNAME` (and `$env:WebJEAUserName`), so scripts can audit or act on who submitted the form.
+* The current user is injected as `WEBJEAUSERNAME` (and `$env:WebJEAUserName`), so scripts can audit or act on who submitted the form. When an app calls the [API](api.md) in Entra mode, it's `app:<client-id>`.
 * Output streams (output/information/warning/error/verbose/debug) are formatted automatically, and `[[a|...]]`, `[[span|...]]`, and `[[img|...]]` markup is supported in output — see the [readme](../readme.md) feature list and [Tips](Tips.md).

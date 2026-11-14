@@ -6,7 +6,8 @@ namespace WebJEA.Auth.Entra;
 /// Entra ID user context. MemberOfIds carries the group object IDs from the "groups"
 /// claims and the app role values from the "roles" claims (all lowercased), plus the
 /// user's own object ID and UPN so individual users can be granted access directly in
-/// PermittedGroups.
+/// PermittedGroups. App-only callers (client-credentials bearer tokens) are named
+/// "app:&lt;client-id&gt;" and carry their app roles and service principal object ID.
 /// </summary>
 public class EntraUserContext : IUserContext
 {
@@ -53,8 +54,10 @@ public class EntraUserContext : IUserContext
     private EntraUserContext(ClaimsPrincipal principal, IEnumerable<string> freshGroupIds,
                              GraphGroupLoader graphGroupLoader, bool warnOnOverage)
     {
-        UserName = FirstClaim(principal, "preferred_username", ClaimTypes.Upn, ClaimTypes.Name)
-                   ?? principal.Identity?.Name ?? "";
+        bool appOnly = EntraPrincipal.IsAppOnly(principal);
+        UserName = appOnly
+            ? EntraPrincipal.AppUserNamePrefix + EntraPrincipal.AppId(principal)
+            : FirstClaim(principal, "preferred_username", ClaimTypes.Upn, ClaimTypes.Name) ?? principal.Identity?.Name ?? "";
         _tenantId = FirstClaim(principal, "tid", "http://schemas.microsoft.com/identity/claims/tenantid") ?? "-";
 
         if (freshGroupIds != null)
@@ -80,7 +83,9 @@ public class EntraUserContext : IUserContext
             _ids.Add(objectId.ToLowerInvariant());
         }
 
-        if (!string.IsNullOrEmpty(UserName))
+        // An app is granted access by its app roles (or its service principal's object ID),
+        // never by the "app:<client-id>" label
+        if (!appOnly && !string.IsNullOrEmpty(UserName))
         {
             _ids.Add(UserName.ToLowerInvariant());
         }

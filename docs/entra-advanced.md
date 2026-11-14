@@ -40,7 +40,7 @@ App roles are WebJEA-specific roles defined on the app registration, such as `We
 1. In your **app registration**, go to **App roles** → **+ Create app role**.
 2. Fill in:
    - **Display name**: e.g., "WebJEA HR" (what admins see when assigning).
-   - **Allowed member types**: **Users/Groups**.
+   - **Allowed member types**: **Users/Groups**. For roles that scripts and services calling the API hold, choose **Applications** or **Both**; see [API access for automation](entra-appreg.md#optional-api-access-for-automation-app-only).
    - **Value**: e.g., `WebJEA.HR`. This exact string goes in `PermittedGroups`. No spaces allowed.
    - **Description**: e.g., "Can run the HR scripts".
    - **Do you want to enable this app role?**: checked.

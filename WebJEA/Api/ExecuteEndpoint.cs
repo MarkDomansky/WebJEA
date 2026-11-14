@@ -26,6 +26,9 @@ public static class ExecuteEndpoint
                 return;
             }
 
+            // Also the CSRF guard for cookie-authenticated callers: a cross-site page can only
+            // send application/json after a CORS preflight, and WebJEA allows no CORS origins.
+            // Bearer-token callers aren't exposed to CSRF.
             string contentType = context.Request.ContentType ?? "";
             if (!contentType.StartsWith("application/json", StringComparison.OrdinalIgnoreCase))
             {

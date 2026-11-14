@@ -87,6 +87,7 @@ $ErrorActionPreference = 'Stop'
 # when a new docs file needs a title the file name cannot express.
 $PageNameOverrides = @{
     'README'               = 'Home'
+    'api'                  = 'API-Access'
     'deployment-migration' = 'Deployment-and-Migration'
     'dev'                  = 'Development-Auto-Login'
     'entra'                = 'Entra-ID'

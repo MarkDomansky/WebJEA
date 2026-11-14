@@ -454,6 +454,44 @@ function Step_ContainerVerify([string]$OsNote)
     }
 }
 
+function Step_EntraBearerApi([string]$BaseUrl)
+{
+    @{
+        Title  = 'Call the API with an app-only bearer token (automation)'
+        Body   = @(
+            'Follow docs/entra-appreg.md "Optional: API access for automation":'
+            '  1. On the WebJEA registration: Expose an API -> set the Application ID URI'
+            '     (api://<client-id>); App roles -> create WebJEA.Automation, member type'
+            '     Applications.'
+            '  2. New "webjea-test-client" app registration with a client secret; API'
+            '     permissions -> WebJEA -> Application permissions -> WebJEA.Automation ->'
+            '     Grant admin consent.'
+            '  3. scripts\webjea.json: add "WebJEA.Automation" to the Overview command''s'
+            '     PermittedGroups (replace "*" so the role is what grants access).'
+            '  4. A second client registration with NO role assigned, for the 401 check.'
+            'Then run the docs/api.md script (or the lines below) from any machine.'
+        )
+        Code   = @(
+            '$tenant = "<tenant-id>"; $webjea = "<webjea-client-id>"'
+            '$body = @{ client_id = "<client-id>"; client_secret = "<secret>"; grant_type = "client_credentials"; scope = "api://$webjea/.default" }'
+            '$token = (Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$tenant/oauth2/v2.0/token" -Body $body).access_token'
+            '$h = @{ Authorization = "Bearer $token" }'
+            ('Invoke-RestMethod -Uri "{0}/api/menu" -Headers $h' -f $BaseUrl)
+            ('Invoke-RestMethod -Uri "{0}/api/config" -Headers $h | Select-Object userName' -f $BaseUrl)
+            ('Invoke-RestMethod -Method Post -Uri "{0}/api/execute" -Headers $h -ContentType "application/json" -Body ''{{"cmdid":"overview","parameters":{{}}}}''' -f $BaseUrl)
+        )
+        Verify = @(
+            '/api/menu lists the Overview command (and any "*" commands), nothing else'
+            '/api/config userName is app:<client-id>'
+            'execute returns status 200; webjea-usage.log shows User=app:<client-id>'
+            'Token from the no-role client: 401 JSON; webjea.log shows IDW10201'
+            'Token for another resource (scope=https://graph.microsoft.com/.default): 401'
+            'A browser user signed in at the same time can still browse and run commands'
+            '  (no 503 "Couldn''t verify your sign-in" - Graph revalidation still works)'
+        )
+    }
+}
+
 #endregion Container step builders
 
 #region Scenario definitions
@@ -644,6 +682,7 @@ function Get-Scenarios
                 )
             }
             (Step_ContainerVerify -OsNote 'Note: the starter overview.ps1 calls Get-Process svchost, which does not exist on Linux - it will surface as a script ERROR in the output. That is fine here: it doubles as the error-rendering check (page still returns HTTP 200).')
+            (Step_EntraBearerApi -BaseUrl 'http://localhost:8080')
             @{
                 Title  = 'Cleanup'
                 Body   = @('Stop and remove the stack.')

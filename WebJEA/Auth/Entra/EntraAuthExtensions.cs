@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Identity.Web;
 using WebJEA.Api;
@@ -8,8 +9,16 @@ public static class EntraAuthExtensions
 {
     private static readonly NLog.Logger dlog = NLog.LogManager.GetCurrentClassLogger();
 
+    /// <summary>Default scheme: forwards bearer requests to JwtBearer and the rest to OIDC.</summary>
+    public const string PolicyScheme = "Entra";
+
+    internal const string InvalidTokenMessage = "Invalid or expired token, or the calling app has no WebJEA app role.";
+
+    internal const string DelegatedTokenMessage = "Delegated (user) tokens aren't supported; use an app-only (client credentials) token.";
+
     /// <summary>
-    /// Entra ID (Azure AD) authentication: OIDC web-app sign-in with cookies.
+    /// Entra ID (Azure AD) authentication: OIDC web-app sign-in with cookies for users, and
+    /// app-only bearer tokens (client credentials) for automation calling /api.
     /// Authorization uses the "groups" claim (group object IDs) and the "roles" claim
     /// (app role values). Authentication:Entra:EnableGraph (on by default) adds the
     /// >200-group overage fallback, display names in PermittedGroups (with
@@ -31,23 +40,42 @@ public static class EntraAuthExtensions
             AddClientCapability(builder.Configuration, azureAd, "cp1");
         }
 
+        // Requests with "Authorization: Bearer" are automation (app-only tokens); everything
+        // else is a browser user on OIDC sign-in and cookies, exactly as before.
         var authBuilder = builder.Services
-            .AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
-            .AddMicrosoftIdentityWebApp(azureAd);
+            .AddAuthentication(PolicyScheme)
+            .AddPolicyScheme(PolicyScheme, "Entra (browser or bearer)", options =>
+            {
+                options.ForwardDefaultSelector = context => HasBearerToken(context.Request)
+                    ? JwtBearerDefaults.AuthenticationScheme
+                    : OpenIdConnectDefaults.AuthenticationScheme;
+            });
+
+        var webAppBuilder = authBuilder.AddMicrosoftIdentityWebApp(azureAd);
+        authBuilder.AddMicrosoftIdentityWebApi(azureAd, JwtBearerDefaults.AuthenticationScheme);
 
         builder.Services.PostConfigure<OpenIdConnectOptions>(OpenIdConnectDefaults.AuthenticationScheme, ReturnUnauthorizedForApi);
+        builder.Services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, AcceptAppOnlyTokens);
+        builder.Services.AddHttpContextAccessor();
 
         if (enableGraph)
         {
             LogGraphCredential(azureAd);
 
-            authBuilder
+            webAppBuilder
                 .EnableTokenAcquisitionToCallDownstreamApi(new[] { "GroupMember.Read.All" })
                 .AddMicrosoftGraph(builder.Configuration.GetSection("MicrosoftGraph"))
                 .AddInMemoryTokenCaches();
 
+            // Token acquisition otherwise looks up its options under the default scheme,
+            // which is now the policy scheme. Graph calls are always made as the signed-in user.
+            builder.Services.PostConfigure<GraphServiceClientOptions>(options =>
+                options.AcquireTokenOptions.AuthenticationOptionsName = OpenIdConnectDefaults.AuthenticationScheme);
+
             builder.Services.AddScoped<GraphGroupLoader>();
         }
+
+        dlog.Info("Entra: app-only bearer tokens accepted for /api (an assigned app role is required).");
 
         if (revalidate)
         {
@@ -90,6 +118,55 @@ public static class EntraAuthExtensions
             }
 
             await redirectToIdentityProvider(context);
+        };
+    }
+
+    private static bool HasBearerToken(HttpRequest request)
+    {
+        string authorization = request.Headers.Authorization;
+        return authorization != null && authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Bearer tokens are for automation: app-only (client-credentials) tokens carrying an app
+    /// role. Microsoft.Identity.Web already rejects tokens with neither roles nor scopes
+    /// (IDW10201); delegated user tokens are rejected here. Rejections are a JSON 401 like
+    /// the rest of /api, with the reason in the log rather than the response.
+    /// </summary>
+    private static void AcceptAppOnlyTokens(JwtBearerOptions options)
+    {
+        var tokenValidated = options.Events.OnTokenValidated;
+        options.Events.OnTokenValidated = async context =>
+        {
+            await tokenValidated(context);
+            if (context.Result != null) return;
+
+            if (EntraPrincipal.HasDelegatedScopes(context.Principal))
+            {
+                context.Fail(DelegatedTokenMessage);
+                return;
+            }
+
+            EntraPrincipal.MarkAppOnly(context.Principal);
+        };
+
+        var challenge = options.Events.OnChallenge;
+        options.Events.OnChallenge = async context =>
+        {
+            await challenge(context);
+            if (context.Handled) return;
+
+            context.HandleResponse();
+            if (context.AuthenticateFailure != null)
+            {
+                dlog.Info("Entra: bearer token rejected for " + context.Request.Path + ": " + context.AuthenticateFailure.Message);
+                context.Response.Headers.WWWAuthenticate = "Bearer error=\"invalid_token\"";
+                await EndpointHelpers.WriteErrorAsync(context.HttpContext, StatusCodes.Status401Unauthorized, InvalidTokenMessage);
+                return;
+            }
+
+            context.Response.Headers.WWWAuthenticate = "Bearer";
+            await EndpointHelpers.WriteErrorAsync(context.HttpContext, StatusCodes.Status401Unauthorized, "Authentication required.");
         };
     }
 
