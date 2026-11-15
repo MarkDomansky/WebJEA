@@ -114,7 +114,7 @@ A self-signed certificate is fine. Entra only checks that the public key matches
      ```
 
    > [!IMPORTANT]
-   > `Deploy.ps1` grants this permission only for the **HTTPS** certificate (`CertSubject`). It doesn't know about the Graph certificate, so you have to grant it yourself, including after every renewal, because a renewed certificate has a new key file. Without it, Graph calls fail with `Keyset does not exist` ([Troubleshooting](entra.md#troubleshooting)).
+   > `Deploy.ps1` grants this permission only for the **HTTPS** certificate (`CertSubject` or `CertPath`). It doesn't know about the Graph certificate, so you have to grant it yourself, including after every renewal, because a renewed certificate has a new key file. Without it, Graph calls fail with `Keyset does not exist` ([Troubleshooting](entra.md#troubleshooting)).
 
 4. **Record the subject** (`CN=WebJEA-Graph`). It becomes `AzureAd:ClientCredentials` (see [Configure WebJEA](entra.md#configure-webjea)). For Docker, keep `graph.pfx` and its password out of version control.
 

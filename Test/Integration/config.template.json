@@ -38,7 +38,11 @@
         "ExtractPath": "C:\\Deploy",
         "SettingsFileName": "settings.json",
         "_comment2": "Path on the VM where settings.json should be copied from (local to script runner)",
-        "LocalSettingsPath": ".\\settings.json"
+        "LocalSettingsPath": ".\\settings.json",
+        "_comment3": "Self-signed test certificate made on the VM before Deploy.ps1 runs. Store: in LocalMachine\\My for the settings file's CertSubject (unless one exists). File: a fresh PFX at its CertPath with a random password, passed as -CertPassword. None: provide your own.",
+        "CertMode": "Store",
+        "_comment4": "Only for a regular (non-gMSA) ServiceUserName: SecretManagement secret holding its password, passed as -ServicePassword. Leave empty for a gMSA.",
+        "ServicePasswordSecretName": ""
     },
 
     "WebServer": {

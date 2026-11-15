@@ -29,7 +29,17 @@ param (
     [switch]$SkipSpnCheck,
 
     [Parameter()]
-    [switch]$AllowHttpWithoutRedirect
+    [switch]$AllowHttpWithoutRedirect,
+
+    #Passwords are parameters only, never settings-file keys, so they are not stored next
+    #to the release. -ServicePassword: for a regular (non-gMSA) ServiceUserName; needed
+    #on the first deploy or when the account or its password changes. -CertPassword: for
+    #a password-protected PFX at CertPath; later deploys reuse the stored one.
+    [Parameter()]
+    [securestring]$ServicePassword,
+
+    [Parameter()]
+    [securestring]$CertPassword
 )
 begin
 {
@@ -383,29 +393,51 @@ begin
             -Value "$($settings.ScriptsPath)\webjea.json"
 
         #Kestrel listeners use Kestrel's native endpoint configuration. A disabled listener
-        #([int]$null is 0, so a missing/null port key disables it) is simply absent. The
-        #certificate is selected by Kestrel at startup from LocalMachine\My by subject (the
-        #newest matching, valid one), so a renewal needs no settings change.
-        #'*' listens on every IPv4 and IPv6 address.
+        #([int]$null is 0, so a missing/null port key disables it) is simply absent.
+        #'*' listens on every IPv4 and IPv6 address. The certificate is either:
+        # - CertSubject: picked by Kestrel at startup from LocalMachine\My (the match that
+        #   expires last), so a renewal is used after the next restart. AllowInvalid is
+        #   always on: without it Kestrel drops any certificate whose chain or revocation
+        #   check fails at that moment - an unreachable CRL would stop HTTPS starting.
+        #   ValidateSettings has already warned about anything untrusted.
+        # - CertPath: a PFX file Kestrel loads and reloads whenever the file changes, so an
+        #   ACME client renewing it in place needs no restart. Password only if it has one.
+        #The whole Certificate object is replaced, so nothing from the other mode lingers.
         $endpoints = [ordered]@{}
         if ([int]$settings.HttpPort -gt 0)
         {
             $endpoints.Http = [ordered]@{ Url = "http://*:$([int]$settings.HttpPort)" }
         }
+        $certLabel = $null
         if ([int]$settings.HttpsPort -gt 0)
         {
-            $endpoints.Https = [ordered]@{
-                Url         = "https://*:$([int]$settings.HttpsPort)"
-                Certificate = [ordered]@{
+            if (-not [string]::IsNullOrWhiteSpace([string]$settings.CertPath))
+            {
+                $certificate = [ordered]@{ Path = [string]$settings.CertPath }
+                $certLabel = "certificate file '$($settings.CertPath)'"
+                if (-not [string]::IsNullOrEmpty($settings.ResolvedCertPassword))
+                {
+                    $certificate.Password = [string]$settings.ResolvedCertPassword
+                    $certLabel += ', password set' #never the password itself
+                }
+            }
+            else
+            {
+                $certificate = [ordered]@{
                     Subject      = [string]$settings.CertSubject
                     Store        = 'My'
                     Location     = 'LocalMachine'
-                    AllowInvalid = [bool]$settings.AllowUntrustedCert
+                    AllowInvalid = $true
                 }
+                $certLabel = "certificate subject '$($settings.CertSubject)'"
+            }
+            $endpoints.Https = [ordered]@{
+                Url         = "https://*:$([int]$settings.HttpsPort)"
+                Certificate = $certificate
             }
         }
         $endpointLabel = @($endpoints.Keys | ForEach-Object { $endpoints[$_].Url }) -join ', '
-        if ($endpoints.Contains('Https')) { $endpointLabel += " (certificate subject '$($settings.CertSubject)')" }
+        if ($certLabel) { $endpointLabel += " ($certLabel)" }
         Step_AppSettingsValue -SitePath $settings.SitePath -KeyPath 'Kestrel', 'Endpoints' -Value $endpoints `
             -Label "Kestrel.Endpoints = $endpointLabel"
 
@@ -515,14 +547,26 @@ begin
         $svcName = $settings.ServiceName
         $exePath = Join-Path $settings.SitePath 'WebJEA.exe'
         $account = $settings.ServiceUserName
-        $password = $settings.ServicePassword
+        $isGmsa = $account -match '\$$'
+        #Copied into a local for the closures below (same reason as $skipSpn), and kept a
+        #SecureString until sc.exe needs it.
+        $servicePasswordSecure = $ServicePassword
+        $accountSid = (ResolveAccountSid -Account $account).Value
 
         #Grant Logon-as-a-Service directly to the service account (was granted to the
         #IIS APPPOOL\ principal in the IIS era). Resolved to a SID here rather than inside
         #the step so an unresolvable account fails before anything has been changed, with
         #ResolveAccountSid's message rather than a bare secedit exit code.
         Step_UserRight -Constant 'SeServiceLogonRight' -Account $account `
-            -Sid (ResolveAccountSid -Account $account).Value -Label 'Logon as a Service'
+            -Sid $accountSid -Label 'Logon as a Service'
+
+        #A PFX certificate is read by Kestrel straight from its folder - which belongs to the
+        #ACME client, so only the read access is added, nothing else changed. Folder, not
+        #file: a renewal replaces the file, and the replacement inherits from the folder.
+        if ([int]$settings.HttpsPort -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$settings.CertPath))
+        {
+            Step_FolderAccess -Path (Split-Path -Path $settings.CertPath -Parent) -Account $account -Sid $accountSid -Rights 'Read' -Label 'read'
+        }
 
         #Serving HTTPS takes more than putting the certificate in LocalMachine\My: that
         #store is readable by everyone, but the private key file behind the certificate is
@@ -531,9 +575,10 @@ begin
         #it Kestrel cannot open the key and the HTTPS listener fails at startup. Grant the
         #account plain Read on that file instead. Checked on every deploy because renewing a
         #certificate produces a NEW key file with the default permissions again.
-        #Kestrel picks the certificate itself at startup (newest valid match for CertSubject),
-        #so grant on EVERY certificate whose subject matches (ValidateSettings collected them
-        #as CertMatches): a renewal that is already imported then works on the next restart.
+        #Kestrel picks the certificate itself at startup (the CertSubject match that expires
+        #last), so grant on EVERY certificate whose subject matches (ValidateSettings collected
+        #them as CertMatches): a renewal that is already imported then works on the next
+        #restart. Store mode only; with CertPath, CertMatches is empty.
         foreach ($matchedCert in @($settings.CertMatches))
         {
             $thumbprint = $matchedCert.Thumbprint
@@ -609,18 +654,29 @@ begin
             SetScript   = {
                 $svc = Get-CimInstance Win32_Service -Filter "Name='$svcName'" -ErrorAction SilentlyContinue
 
-                #Always pass password= (even empty, for gMSA accounts): sc.exe requires it
-                #whenever the account is not LocalSystem, and MUST see it again on `config`
-                #whenever the account changes (e.g. password-account -> gMSA on a redeploy) -
-                #omitting it there would leave the old credential in place and Finalize's
-                #Restart-Service would then fail with a logon error. Windows PowerShell 5.1
-                #drops a bare empty-string argument to native commands (shifting the rest of
-                #argv), so an empty password is passed as '""' - the string containing two
-                #quote chars reaches sc.exe as an empty quoted value. The script forces
-                #$PSNativeCommandArgumentPassing = 'Legacy' at the top so this idiom behaves
-                #the same under pwsh 7.2+.
-                $passwordArg = if ([string]::IsNullOrEmpty($password)) { '""' } else { $password }
-                $scArgs = @('binPath=', "`"$exePath`"", 'start=', 'delayed-auto', 'obj=', $account, 'password=', $passwordArg)
+                #obj=/password= go together. sc.exe requires password= whenever the account
+                #is not LocalSystem, and MUST see it again on `config` whenever the account
+                #changes (e.g. password-account -> gMSA on a redeploy) - omitting it there
+                #would leave the old credential in place and Finalize's Restart-Service would
+                #then fail with a logon error.
+                # - gMSA: empty password. Windows PowerShell 5.1 drops a bare empty-string
+                #   argument to native commands (shifting the rest of argv), so it is passed
+                #   as '""' - the string containing two quote chars reaches sc.exe as an
+                #   empty quoted value. The script forces $PSNativeCommandArgumentPassing =
+                #   'Legacy' at the top so this idiom behaves the same under pwsh 7.2+.
+                # - regular account with -ServicePassword: that password.
+                # - regular account without it: ValidateSettings only allows that when the
+                #   service already runs as this account, so both are left out and the
+                #   stored credential is kept (passing an empty one would break the logon).
+                $scArgs = @('binPath=', "`"$exePath`"", 'start=', 'delayed-auto')
+                if ($isGmsa)
+                {
+                    $scArgs += @('obj=', $account, 'password=', '""')
+                }
+                elseif ($servicePasswordSecure)
+                {
+                    $scArgs += @('obj=', $account, 'password=', [System.Net.NetworkCredential]::new('', $servicePasswordSecure).Password)
+                }
 
                 if (-not $svc)
                 {
@@ -634,6 +690,22 @@ begin
                 }
                 & sc.exe description $svcName 'WebJEA - web front-end for PowerShell scripts' | Out-Null
             }.GetNewClosure()
+        }
+
+        #A password passed for an account the service already runs as is a rotation: the
+        #step above sees nothing to change (it can't read the stored password), so apply
+        #it explicitly. Harmless right after the step above has just set it.
+        if (-not $isGmsa -and $servicePasswordSecure)
+        {
+            @{
+                Description = "Service '$svcName' logs on as $account with the password from -ServicePassword"
+                RunAlways   = $true
+                SetScript   = {
+                    $plain = [System.Net.NetworkCredential]::new('', $servicePasswordSecure).Password
+                    & sc.exe config $svcName obj= $account password= $plain | Out-Null
+                    if ($LASTEXITCODE -ne 0) { throw "sc.exe config failed with exit code $LASTEXITCODE while setting the service password" }
+                }.GetNewClosure()
+            }
         }
 
         #Restart on failure: 5s, 10s, 30s; reset the failure counter daily.
@@ -921,6 +993,67 @@ begin
         finally { $chain.Dispose() }
     }
 
+    function GetCertProblems([System.Security.Cryptography.X509Certificates.X509Certificate2]$Cert, [string[]]$FQDNs, [switch]$SkipTrust)
+    {
+        #Fatal: Kestrel cannot serve the certificate at all. Warnings: it will serve it, but
+        #some or all browsers will complain - the admin's call, so the deploy goes on.
+        #-SkipTrust leaves out the chain build (an online revocation check per call) when
+        #only the fatal list is wanted.
+        $fatal = @()
+        $warnings = @()
+        if (-not $Cert.HasPrivateKey)
+        {
+            $fatal += 'it has no private key (export it again as a PFX that includes the private key)'
+        }
+        $serverAuthOid = '1.3.6.1.5.5.7.3.1'
+        $eku = $Cert.Extensions | Where-Object { $_ -is [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension] }
+        if ($eku -and -not ($eku.EnhancedKeyUsages | Where-Object { $_.Value -eq $serverAuthOid }))
+        {
+            $fatal += 'its enhanced key usage does not include Server Authentication'
+        }
+        if ($SkipTrust) { return @{ Fatal = $fatal; Warnings = $warnings } }
+
+        $now = Get-Date
+        if ($Cert.NotBefore -gt $now) { $warnings += "it is not valid until $($Cert.NotBefore)" }
+        elseif ($Cert.NotAfter -lt $now) { $warnings += "it expired on $($Cert.NotAfter) - browsers will refuse it" }
+        else
+        {
+            $daysLeft = [int][Math]::Floor(($Cert.NotAfter - $now).TotalDays)
+            if ($daysLeft -lt 30) { $warnings += "it expires in $daysLeft day(s)" }
+        }
+        #NotTimeValid repeats the date warning above.
+        $chainErrors = @(GetCertChainErrors -Cert $Cert | Where-Object { $_ -notlike 'NotTimeValid:*' })
+        if ($chainErrors.Count -gt 0)
+        {
+            $warnings += "it is not trusted by this server ($($chainErrors -join '; ')) - browsers that don't trust its issuer will show a warning"
+        }
+        $certNames = @($Cert.DnsNameList.Unicode)
+        foreach ($fqdn in @($FQDNs))
+        {
+            $wildcardName = if ($fqdn.Contains('.')) { '*.' + $fqdn.Split('.', 2)[1] } else { $null }
+            if (-not ($certNames -contains $fqdn -or ($wildcardName -and $certNames -contains $wildcardName)))
+            {
+                $warnings += "it does not cover host name '$fqdn' (certificate names: $($certNames -join ', ')) - browsers will show a name mismatch"
+            }
+        }
+        return @{ Fatal = $fatal; Warnings = $warnings }
+    }
+
+    function OpenPfx([string]$Path, [string]$Password)
+    {
+        #Opened only to be checked, so keep the private key out of the machine's key
+        #folders: EphemeralKeySet (.NET Framework 4.7.2+, every pwsh) holds it in memory.
+        #Older frameworks get a temporary key container, which the caller's Reset() removes.
+        #[string] keeps a missing password an empty string, which also opens a PFX that
+        #was exported with no password, and avoids the SecureString overload.
+        $flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::DefaultKeySet
+        if ([Enum]::GetNames([System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]) -contains 'EphemeralKeySet')
+        {
+            $flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]'EphemeralKeySet'
+        }
+        return [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($Path, [string]$Password, $flags)
+    }
+
     function GetBroadAccessWarnings([string]$Path, [string]$Label, [switch]$WarnOnRead)
     {
         #Deploy only ever ADDS what the service account needs; it does not take over a
@@ -1027,15 +1160,31 @@ begin
             $settings | Add-Member -NotePropertyName ServiceName -NotePropertyValue 'WebJEA' -Force
         }
 
-        #verify the service account (same gMSA-vs-password rules as before)
+        #Passwords are accepted only as parameters (-ServicePassword, -CertPassword), so they
+        #never sit in a settings file next to the release. Files from earlier releases carry
+        #an empty ServicePassword key, which is harmless and accepted.
+        Assert ([string]::IsNullOrEmpty([string]$settings.ServicePassword)) ('The settings file contains a ServicePassword. ' +
+            'Pass it with -ServicePassword instead (e.g. -ServicePassword (Read-Host -AsSecureString)) so it is not stored in the settings file, and remove the key.')
+        Assert (-not $Settings.PSObject.Properties['CertPassword']) ('The settings file contains CertPassword. ' +
+            'Pass it with -CertPassword instead (e.g. -CertPassword (Read-Host -AsSecureString)) so it is not stored in the settings file, and remove the key.')
+
+        #verify the service account: a gMSA has no password; a regular account needs one
+        #unless the service already runs as it (a re-deploy keeps the stored credential)
         Assert ($settings.ServiceUserName -match '^[^\\]+\\[^\\]+$') "ServiceUserName '$($settings.ServiceUserName)' is not in the correct format. It should be in the format 'domain\\username' or 'machinename\\username'."
-        if ($settings.ServicePassword)
+        if ($settings.ServiceUserName -notmatch '\$$')
         {
-            Assert ($settings.ServiceUserName -notmatch '\$$') "ServiceUserName '$($settings.ServiceUserName)' appears to be a gMSA account (ends with $) but a password is provided. Remove the password for gMSA accounts or provide a valid password for regular user accounts."
+            if (-not $ServicePassword)
+            {
+                #Same comparison the service step makes, so "already runs as it" here means
+                #that step will leave the account (and its password) alone.
+                $existingService = Get-CimInstance Win32_Service -Filter "Name='$($settings.ServiceName)'" -ErrorAction SilentlyContinue
+                Assert ($existingService -and $existingService.StartName -eq $settings.ServiceUserName) ("ServiceUserName '$($settings.ServiceUserName)' is a regular account " +
+                    "and the '$($settings.ServiceName)' service does not already run as it, so its password is needed: pass -ServicePassword (e.g. -ServicePassword (Read-Host -AsSecureString)), or use a gMSA (trailing `$).")
+            }
         }
         else
         {
-            Assert ($settings.ServiceUserName -match '\$$') "ServiceUserName '$($settings.ServiceUserName)' appears to be a regular user account but no password is provided. Provide a password, or use a gMSA account (trailing $, empty password)."
+            Assert (-not $ServicePassword) "ServiceUserName '$($settings.ServiceUserName)' is a gMSA (ends with `$), which has no password. Remove -ServicePassword, or use a regular account."
             #Get-ADServiceAccount ships with RSAT (ActiveDirectory module) and is absent on
             #non-domain-controller servers that haven't had RSAT installed. Running it anyway
             #would throw a raw command-not-found that the try/catch below swallows, leaving
@@ -1053,7 +1202,7 @@ begin
                     $userobj = Get-ADServiceAccount -Identity $settings.ServiceUserName.Split('\')[1]
                 }
                 catch {}
-                Assert ($null -ne $userobj) "ServiceUserName '$($settings.ServiceUserName)' does not appear to be a valid gMSA account. Provide a valid gMSA or a regular user account with a password."
+                Assert ($null -ne $userobj) "ServiceUserName '$($settings.ServiceUserName)' does not appear to be a valid gMSA account. Provide a valid gMSA, or a regular account with -ServicePassword."
             }
         }
 
@@ -1061,38 +1210,35 @@ begin
         $httpPort = [int]$settings.HttpPort
         $httpsPort = [int]$settings.HttpsPort
         Assert ($httpPort -gt 0 -or $httpsPort -gt 0) 'At least one of HttpPort or HttpsPort must be set to a port number.'
-        Assert (-not ($httpsPort -gt 0 -and [string]::IsNullOrWhiteSpace($settings.CertSubject))) 'HttpsPort is enabled but CertSubject is not provided.'
-        #[bool]'false' is $true, so a quoted value would silently allow untrusted certificates.
-        Assert ($null -eq $settings.AllowUntrustedCert -or $settings.AllowUntrustedCert -is [bool]) "AllowUntrustedCert must be true or false (unquoted), not '$($settings.AllowUntrustedCert)'."
+        #The certificate comes from exactly one place: the machine store (CertSubject) or a
+        #PFX file (CertPath). Which key is filled in picks the mode.
+        $hasCertSubject = -not [string]::IsNullOrWhiteSpace([string]$settings.CertSubject)
+        $hasCertPath = -not [string]::IsNullOrWhiteSpace([string]$settings.CertPath)
+        if ($httpsPort -gt 0)
+        {
+            Assert ($hasCertSubject -or $hasCertPath) ('HttpsPort is enabled but no certificate is set: set CertSubject (a certificate in LocalMachine\My) ' +
+                'or CertPath (a PFX file, recommended for ACME certificates).')
+            Assert (-not ($hasCertSubject -and $hasCertPath)) 'Set only one of CertSubject (a certificate in LocalMachine\My) and CertPath (a PFX file); leave the other empty.'
+        }
+        #Retired, but harmless: Kestrel is now always allowed to serve the certificate it
+        #finds, and trust problems are warnings. Keep old settings files deploying.
+        if ($Settings.PSObject.Properties['AllowUntrustedCert'])
+        {
+            Write-Warning 'AllowUntrustedCert is no longer used and is ignored: certificate trust problems are now warnings, not errors. Remove it from the settings file.'
+        }
 
         #paths must differ (unchanged)
         Assert ($settings.SitePath -ne $settings.ScriptsPath) 'SitePath and ScriptsPath cannot be the same. Please update the settings file to specify different paths.'
         Assert ($settings.SitePath -ne $settings.LogPath) 'SitePath and LogPath cannot be the same. Please update the settings file to specify different paths.'
         Assert ($settings.LogFile -ne $settings.LogUsageFile) 'LogFile and LogUsageFile cannot be the same. Please update the settings file to specify different paths.'
 
-        #Folder access: the Server section only adds what the service account lacks, so
-        #folders left open to every user (the default under C:\) are reported here rather
-        #than changed. Reading SitePath only matters once a secret is stored there.
+        #The deployed appsettings.Production.json, if any: it holds secrets that matter to
+        #the folder checks below, and the PFX password from an earlier deploy.
         $appSettingsPath = "$($settings.SitePath)\appsettings.Production.json"
-        $siteHasSecret = $false
+        $appSettings = $null
         if (Test-Path -LiteralPath $appSettingsPath -PathType Leaf)
         {
-            $appSettings = $null
             try { $appSettings = Get-Content -LiteralPath $appSettingsPath -Raw | ConvertFrom-Json } catch {}
-            if ($appSettings -and $appSettings.PSObject.Properties['AzureAd'])
-            {
-                $siteHasSecret = -not [string]::IsNullOrEmpty([string]$appSettings.AzureAd.ClientSecret)
-            }
-        }
-        $folderChecks = @(
-            @{ Label = 'SitePath'; Path = $settings.SitePath; WarnOnRead = $siteHasSecret }
-            @{ Label = 'ScriptsPath'; Path = $settings.ScriptsPath; WarnOnRead = $false }
-            @{ Label = 'LogPath'; Path = $settings.LogPath; WarnOnRead = $false }
-        )
-        foreach ($check in $folderChecks)
-        {
-            $warning = GetBroadAccessWarnings -Path $check.Path -Label $check.Label -WarnOnRead:$check.WarnOnRead
-            if ($warning) { Write-Warning $warning }
         }
 
         #Host names: one list, explicit names only. SiteFQDN/SecondarySiteFQDNs were never
@@ -1111,19 +1257,16 @@ begin
         Assert ($allFQDNs.Count -gt 0) 'SiteFQDNs must list at least one host name WebJEA answers on.'
         $Settings | Add-Member -NotePropertyName SiteFQDNs -NotePropertyValue $allFQDNs -Force
 
-        #Certificate checks. Kestrel selects the certificate itself at startup
-        #(Kestrel:Endpoints:Https:Certificate): subject contains CertSubject, Server
-        #Authentication EKU (or none), private key, trusted and in date unless AllowInvalid,
-        #newest NotAfter wins. Deploy doesn't host anything; it checks here - before the
-        #service is stopped - that the certificate Kestrel will pick is one that should serve
-        #HTTPS, and collects every match for the private-key ACL step.
+        #Certificate checks, before the service is stopped. Kestrel is always told
+        #AllowInvalid, so it serves whatever certificate it can load: only what would stop
+        #it loading one fails the deploy here, and everything else (trust, dates, names) is
+        #a warning - the admin chose the certificate.
         $certMatches = @()
-        if ($httpsPort -gt 0)
+        $resolvedCertPassword = $null
+        if ($httpsPort -gt 0 -and $hasCertSubject)
         {
             $subject = $settings.CertSubject.Trim()
             $settings.CertSubject = $subject #written to Kestrel:Endpoints as-is
-            $allowUntrusted = [bool]$settings.AllowUntrustedCert
-            $now = Get-Date
 
             #IndexOf, not -like: a wildcard certificate's subject contains '*', which -like
             #would treat as a pattern. Case-insensitive substring is what Kestrel's
@@ -1139,75 +1282,141 @@ begin
             $subjects = @($certMatches | ForEach-Object { $_.Subject } | Select-Object -Unique)
             if ($subjects.Count -gt 1)
             {
-                Write-Warning "CertSubject '$subject' matches certificates with different subjects ($($subjects -join ' | ')). Kestrel serves the newest valid one among them - use a more specific CertSubject if that is not intended."
+                Write-Warning "CertSubject '$subject' matches certificates with different subjects ($($subjects -join ' | ')). Kestrel serves the one that expires last - use a more specific CertSubject if that is not intended."
             }
 
-            #Walk newest-first, rejecting what Kestrel would skip; the first survivor is the
-            #certificate it will serve. With AllowUntrustedCert Kestrel skips only on EKU, so
-            #the newest EKU-capable match is its pick even if out of date - checked below.
-            $serverAuthOid = '1.3.6.1.5.5.7.3.1'
-            $cert = $null
-            $rejected = @()
-            $untrustedSeen = $false
-            foreach ($candidate in $certMatches)
+            #With AllowInvalid, Kestrel skips only matches that don't allow Server
+            #Authentication (and keys it can't open - the Service section grants that), then
+            #serves the one that expires last. Newest-first, so the first usable one is it.
+            $usable = @($certMatches | Where-Object { (GetCertProblems -Cert $_ -FQDNs @() -SkipTrust).Fatal.Count -eq 0 })
+            Assert ($usable.Count -gt 0) ("No certificate matching CertSubject '$subject' allows Server Authentication, so Kestrel cannot serve any of them: " +
+                (($certMatches | ForEach-Object { "$($_.Thumbprint) '$($_.Subject)'" }) -join ', ') + '. Issue one for Server Authentication, or correct CertSubject.')
+            $cert = $usable[0]
+            $certLabel = "Certificate $($cert.Thumbprint) '$($cert.Subject)' (issued by '$($cert.Issuer)', expires $($cert.NotAfter.ToString('yyyy-MM-dd')))"
+            $problems = GetCertProblems -Cert $cert -FQDNs $allFQDNs
+            foreach ($problem in $problems.Warnings) { Write-Warning "${certLabel}: $problem." }
+
+            #The latest expiry wins even over a better certificate - e.g. a self-signed lab
+            #certificate imported with the same subject. Say so when that is what happens.
+            if ($problems.Warnings.Count -gt 0)
             {
-                $reasons = @()
-                $eku = $candidate.Extensions | Where-Object { $_ -is [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension] }
-                if ($eku -and -not ($eku.EnhancedKeyUsages | Where-Object { $_.Value -eq $serverAuthOid }))
+                foreach ($older in @($usable | Select-Object -Skip 1))
                 {
-                    $reasons += 'no Server Authentication enhanced key usage'
-                }
-                elseif (-not $allowUntrusted)
-                {
-                    if ($candidate.NotBefore -gt $now) { $reasons += "not valid until $($candidate.NotBefore)" }
-                    elseif ($candidate.NotAfter -lt $now) { $reasons += "expired $($candidate.NotAfter)" }
-                    else
+                    if ((GetCertProblems -Cert $older -FQDNs $allFQDNs).Warnings.Count -eq 0)
                     {
-                        $chainErrors = @(GetCertChainErrors -Cert $candidate)
-                        if ($chainErrors.Count -gt 0)
-                        {
-                            $reasons += "not trusted by this server ($($chainErrors -join '; '))"
-                            $untrustedSeen = $true
-                        }
+                        Write-Warning "Kestrel will serve $($cert.Thumbprint) because it expires last, although $($older.Thumbprint) (expires $($older.NotAfter.ToString('yyyy-MM-dd'))) has none of these problems. Remove $($cert.Thumbprint) from LocalMachine\My if it should not be served."
+                        break
                     }
                 }
-                if ($reasons.Count -eq 0) { $cert = $candidate; break }
-                $rejected += "$($candidate.Thumbprint) '$($candidate.Subject)' (expires $($candidate.NotAfter.ToString('yyyy-MM-dd'))): $($reasons -join ', ')"
+            }
+        }
+        elseif ($httpsPort -gt 0)
+        {
+            #PFX file: Kestrel loads it from the path and reloads it when the file changes, so
+            #an ACME client renewing it in place needs no restart and no key permissions.
+            $certPath = $settings.CertPath.Trim()
+            $settings.CertPath = $certPath #written to Kestrel:Endpoints as-is
+            Assert ($certPath -match '^([A-Za-z]:\\|\\\\)') "CertPath '$certPath' must be a full path to the PFX file, e.g. C:\webjea\tls\webjea.pfx."
+            Assert (Test-Path -LiteralPath $certPath -PathType Leaf) "CertPath '$certPath' does not exist. Point it at the PFX file your ACME client (or you) writes - see docs/Certificate-Renewal.md."
+
+            #Password: -CertPassword when given (it must work); otherwise the one stored by
+            #an earlier deploy, so re-runs don't need it again; otherwise none.
+            $candidates = @()
+            if ($CertPassword)
+            {
+                $candidates += , @('-CertPassword', [System.Net.NetworkCredential]::new('', $CertPassword).Password)
+            }
+            else
+            {
+                $stored = $null
+                if ($appSettings -and $appSettings.PSObject.Properties['Kestrel']) { $stored = [string]$appSettings.Kestrel.Endpoints.Https.Certificate.Password }
+                if ($stored) { $candidates += , @('the password stored by an earlier deploy', $stored) }
+                $candidates += , @('no password', '')
+            }
+            $cert = $null
+            $openError = $null
+            foreach ($candidate in $candidates)
+            {
+                try
+                {
+                    $cert = OpenPfx -Path $certPath -Password $candidate[1]
+                    $resolvedCertPassword = $candidate[1]
+                    Write-Verbose "CertPath opened with $($candidate[0])."
+                    break
+                }
+                catch
+                {
+                    #Unwrap PowerShell's 'Exception calling ".ctor"...' to the crypto message.
+                    $openError = if ($_.Exception.InnerException) { $_.Exception.InnerException.Message.Trim() } else { $_.Exception.Message }
+                }
             }
             if (-not $cert)
             {
-                $message = "No certificate matching CertSubject '$subject' can serve HTTPS:`n  " + ($rejected -join "`n  ")
-                if ($untrustedSeen)
-                {
-                    $message += "`nInstall the issuing CA chain on this server (and make its revocation list reachable), or, if an untrusted certificate is intentional (lab or self-signed), set AllowUntrustedCert to true in the settings file."
-                }
-                throw $message
+                if ($CertPassword) { throw "The PFX at CertPath '$certPath' could not be opened with -CertPassword: $openError" }
+                throw "The PFX at CertPath '$certPath' could not be opened without a password ($openError). Pass its password with -CertPassword (e.g. -CertPassword (Read-Host -AsSecureString)); later deploys reuse it."
             }
 
-            $certLabel = "Certificate $($cert.Thumbprint) '$($cert.Subject)' (issued by '$($cert.Issuer)', expires $($cert.NotAfter.ToString('yyyy-MM-dd')))"
-            if ($allowUntrusted)
+            try
             {
-                Assert ($cert.NotBefore -le $now -and $cert.NotAfter -ge $now) ("$certLabel is the newest match for CertSubject, which Kestrel serves when " +
-                    "AllowUntrustedCert is true, but it is outside its validity period ($($cert.NotBefore) to $($cert.NotAfter)). Remove it from LocalMachine\My or import a current certificate.")
-                $chainErrors = @(GetCertChainErrors -Cert $cert)
-                if ($chainErrors.Count -gt 0)
+                $certLabel = "Certificate $($cert.Thumbprint) '$($cert.Subject)' in '$certPath' (issued by '$($cert.Issuer)', expires $($cert.NotAfter.ToString('yyyy-MM-dd')))"
+                $problems = GetCertProblems -Cert $cert -FQDNs $allFQDNs
+                Assert ($problems.Fatal.Count -eq 0) "$certLabel cannot serve HTTPS: $($problems.Fatal -join '; ')."
+                foreach ($problem in $problems.Warnings) { Write-Warning "${certLabel}: $problem." }
+            }
+            finally
+            {
+                #Reset deletes the temporary key container a non-ephemeral import leaves
+                #behind on older .NET Framework versions.
+                $cert.Reset()
+            }
+
+            #Where the file lives matters: the service account must not be able to swap
+            #its own certificate, and upgrades must not touch it.
+            $certFolder = Split-Path -Path $certPath -Parent
+            foreach ($owned in @(
+                    @{ Label = 'SitePath'; Path = $settings.SitePath; Why = 'upgrades replace the site folder' }
+                    @{ Label = 'ScriptsPath'; Path = $settings.ScriptsPath; Why = 'script authors may be able to write there' }
+                    @{ Label = 'LogPath'; Path = $settings.LogPath; Why = 'the service account can write there, so it could replace its own certificate' }))
+            {
+                if (($certFolder + '\').StartsWith($owned.Path + '\', [StringComparison]::OrdinalIgnoreCase))
                 {
-                    Write-Warning "$certLabel is not trusted by this server ($($chainErrors -join '; ')). Proceeding because AllowUntrustedCert is true - browsers will show a certificate warning."
+                    Write-Warning "CertPath '$certPath' is inside $($owned.Label) - $($owned.Why). Keep the PFX in its own folder, e.g. C:\webjea\tls (see docs/Certificate-Renewal.md#where-to-put-the-pfx)."
                 }
             }
-            $daysLeft = [int][Math]::Floor(($cert.NotAfter - $now).TotalDays)
-            if ($daysLeft -lt 30) { Write-Warning "$certLabel expires in $daysLeft day(s)." }
-
-            $certNames = @($cert.DnsNameList.Unicode)
-            foreach ($fqdn in $allFQDNs)
+            #Read access only matters when there is no password between a reader and the key.
+            $warning = GetBroadAccessWarnings -Path $certFolder -Label 'The CertPath folder' -WarnOnRead:([string]::IsNullOrEmpty($resolvedCertPassword))
+            if ($warning) { Write-Warning $warning }
+            $otherKeys = @(Get-ChildItem -LiteralPath $certFolder -File -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Extension -in '.pfx', '.p12', '.key', '.pem' -and $_.FullName -ne $certPath })
+            if ($otherKeys.Count -gt 0)
             {
-                $wildcardName = if ($fqdn.Contains('.')) { '*.' + $fqdn.Split('.', 2)[1] } else { $null }
-                Assert ($certNames -contains $fqdn -or ($wildcardName -and $certNames -contains $wildcardName)) "Host name '$fqdn' is not covered by $certLabel (certificate names: $($certNames -join ', '))."
+                Write-Warning "The CertPath folder '$certFolder' also holds $($otherKeys.Name -join ', '). The service account is granted read on the whole folder, so keep only WebJEA's PFX there."
             }
         }
         #Every match, not just the one Kestrel serves today: the private-key ACL step grants
         #on all of them so an already-imported renewal works on the next restart.
         $Settings | Add-Member -NotePropertyName CertMatches -NotePropertyValue $certMatches -Force
+        #Written to Kestrel:Endpoints by the AppConfig step. Never printed.
+        $Settings | Add-Member -NotePropertyName ResolvedCertPassword -NotePropertyValue $resolvedCertPassword -Force
+
+        #Folder access: the Server section only adds what the service account lacks, so
+        #folders left open to every user (the default under C:\) are reported here rather
+        #than changed. Reading SitePath only matters once a secret is stored there.
+        $siteHasSecret = -not [string]::IsNullOrEmpty($resolvedCertPassword)
+        if ($appSettings -and $appSettings.PSObject.Properties['AzureAd'])
+        {
+            $siteHasSecret = $siteHasSecret -or -not [string]::IsNullOrEmpty([string]$appSettings.AzureAd.ClientSecret)
+        }
+        $folderChecks = @(
+            @{ Label = 'SitePath'; Path = $settings.SitePath; WarnOnRead = $siteHasSecret }
+            @{ Label = 'ScriptsPath'; Path = $settings.ScriptsPath; WarnOnRead = $false }
+            @{ Label = 'LogPath'; Path = $settings.LogPath; WarnOnRead = $false }
+        )
+        foreach ($check in $folderChecks)
+        {
+            $warning = GetBroadAccessWarnings -Path $check.Path -Label $check.Label -WarnOnRead:$check.WarnOnRead
+            if ($warning) { Write-Warning $warning }
+        }
     }
 
     function InvokeStep([psobject]$Step, [switch]$TestOnly)
@@ -1312,7 +1521,7 @@ process
     #redirect middleware discovers its port) - there is no separate opt-in setting. If
     #HttpPort is enabled without HttpsPort, HTTP is served directly with NO redirect to
     #HTTPS; that's a valid HTTP-only install, but it's also an easy accident, so require an
-    #explicit opt-in. (ValidateSettings already requires CertSubject whenever HttpsPort is set.)
+    #explicit opt-in. (ValidateSettings already requires CertSubject or CertPath whenever HttpsPort is set.)
     if (-not $AllowHttpWithoutRedirect)
     {
         $httpEnabled = [int]$Settings.HttpPort -gt 0
@@ -1321,7 +1530,7 @@ process
         {
             throw @"
 HttpPort is enabled ($($Settings.HttpPort)) but HttpsPort is not, so HTTP requests will be served directly with no redirect to HTTPS.
-HTTP is redirected to HTTPS automatically whenever both HttpPort and HttpsPort (with CertSubject) are configured - there is no separate redirect setting.
+HTTP is redirected to HTTPS automatically whenever both HttpPort and HttpsPort (with CertSubject or CertPath) are configured - there is no separate redirect setting.
 If an HTTP-only install is intentional, re-run with -AllowHttpWithoutRedirect to proceed.
 "@
         }

@@ -146,7 +146,6 @@ Task StopVM_Web -Depends Init {
 # ---------------------------------------------------------------------------
 #  Deploy tasks
 # ---------------------------------------------------------------------------
-#TODO Create a certificate on the remote server whose subject matches the settings file's CertSubject
 
 Task CleanBuildOutput -Depends Init -PreCondition { -not $script:useGithubBuild -and -not $script:quickBuild } {
     if (-not (Test-Path $script:buildInfoFile)) { New-Item -Path $script:buildOutputDir -ItemType directory -Force | Out-Null }
@@ -354,7 +353,76 @@ Task StageDeployment -Depends GetCredential, StartVMs, ResolveBuildPackage, Reso
     }
 }
 
-Task RunDeployScript -Depends GetCredential, StageDeployment -PreCondition { -not $script:doNotRunDeploy } {
+Task PrepareCertificate -Depends GetCredential, StageDeployment -PreCondition { -not $script:doNotRunDeploy } {
+    # Gives the VM a self-signed certificate for the staged settings file, in whichever
+    # mode Deployment.CertMode asks for:
+    #   Store (default) - one in LocalMachine\My matching CertSubject, unless one exists.
+    #   File            - a fresh PFX at CertPath, in a folder locked down the way
+    #                     docs/Certificate-Renewal.md describes, with a random password
+    #                     that RunDeployScript passes as -CertPassword.
+    #   None            - leave the certificate to whoever set up the VM.
+    # Self-signed, so Deploy.ps1 warns that it is untrusted - which is expected here.
+    $mode = if ($script:config.Deployment.CertMode) { $script:config.Deployment.CertMode } else { 'Store' }
+    Assert ($mode -in 'Store', 'File', 'None') "Deployment.CertMode must be Store, File or None, not '$mode'."
+    $script:testCertPassword = $null
+    if ($mode -eq 'None')
+    {
+        Write-Log 'CertMode None: not creating a certificate'
+        return
+    }
+
+    $session = New-PSSession -VMName $script:webVMName -Credential $script:credential -ErrorAction Stop
+    try
+    {
+        $prepared = Invoke-Command -Session $session -ScriptBlock {
+            param($SettingsPath, $Mode)
+            $ErrorActionPreference = 'Stop'
+            # Same parse as Deploy.ps1: //-comment lines dropped, joined into one document.
+            $settings = (Get-Content -Path $SettingsPath | Where-Object { $_ -notmatch '^\s*//' }) -join "`n" | ConvertFrom-Json
+            if ([int]$settings.HttpsPort -le 0) { return @{ Message = 'HttpsPort is off; no certificate needed' } }
+            $dnsNames = @($settings.SiteFQDNs)
+
+            if ($Mode -eq 'Store')
+            {
+                if (-not $settings.CertSubject) { throw 'Deployment.CertMode is Store, but the settings file has no CertSubject.' }
+                $existing = @(Get-ChildItem Cert:\LocalMachine\My | Where-Object { $_.HasPrivateKey -and $_.Subject -like "*$($settings.CertSubject)*" })
+                if ($existing.Count -gt 0) { return @{ Message = "using existing certificate $($existing[0].Thumbprint) in LocalMachine\My" } }
+                $cert = New-SelfSignedCertificate -DnsName $dnsNames -CertStoreLocation Cert:\LocalMachine\My
+                return @{ Message = "created certificate $($cert.Thumbprint) in LocalMachine\My" }
+            }
+
+            if (-not $settings.CertPath) { throw 'Deployment.CertMode is File, but the settings file has no CertPath.' }
+            $folder = Split-Path -Path $settings.CertPath -Parent
+            if (-not (Test-Path $folder)) { New-Item -ItemType Directory -Path $folder | Out-Null }
+            & icacls.exe $folder /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)(F)' '*S-1-5-32-544:(OI)(CI)(F)' | Out-Null
+            $plain = [Guid]::NewGuid().ToString('N')
+            $password = ConvertTo-SecureString $plain -AsPlainText -Force
+            # Made in the store only to export it; the key leaves with it.
+            $cert = New-SelfSignedCertificate -DnsName $dnsNames -CertStoreLocation Cert:\LocalMachine\My
+            try { Export-PfxCertificate -Cert $cert -FilePath $settings.CertPath -Password $password | Out-Null }
+            finally { Remove-Item -Path "Cert:\LocalMachine\My\$($cert.Thumbprint)" -DeleteKey }
+            return @{ Message = "exported certificate $($cert.Thumbprint) to $($settings.CertPath)"; Password = $password }
+        } -ArgumentList $script:stagedSettingsPath, $mode
+
+        $script:testCertPassword = $prepared.Password
+        Write-Log "Certificate ($mode): $($prepared.Message)" -Level Success
+    }
+    finally
+    {
+        Remove-PSSession -Session $session -ErrorAction SilentlyContinue
+    }
+}
+
+Task RunDeployScript -Depends GetCredential, StageDeployment, PrepareCertificate -PreCondition { -not $script:doNotRunDeploy } {
+    # A regular (non-gMSA) service account's password comes from SecretManagement, like
+    # the VM credential - never from the settings file, which Deploy.ps1 rejects.
+    $servicePassword = $null
+    if ($script:config.Deployment.ServicePasswordSecretName)
+    {
+        $servicePassword = Get-Secret -Name $script:config.Deployment.ServicePasswordSecretName -ErrorAction Stop
+        Assert ($servicePassword -is [securestring]) "Secret '$($script:config.Deployment.ServicePasswordSecretName)' is not a SecureString."
+    }
+
     Write-Log "Establishing PowerShell Direct session to VM '$script:webVMName'..."
     $session = New-PSSession -VMName $script:webVMName -Credential $script:credential -ErrorAction Stop
     Write-Log 'Session established successfully' -Level Success
@@ -365,9 +433,10 @@ Task RunDeployScript -Depends GetCredential, StageDeployment -PreCondition { -no
         Write-Log "  Deploy root:   $script:stagedDeployRoot"
         Write-Log "  Settings file: $script:stagedSettingsPath"
         Write-Log "  Edition:       $script:deployEdition"
+        Write-Log "  Passwords:     -CertPassword $(if ($script:testCertPassword) { 'yes' } else { 'no' }), -ServicePassword $(if ($servicePassword) { 'yes' } else { 'no' })"
 
         $result = Invoke-Command -Session $session -ScriptBlock {
-            param($DeployRoot, $SettingsPath, $Edition)
+            param($DeployRoot, $SettingsPath, $Edition, $CertPassword, $ServicePassword)
             $ErrorActionPreference = 'Stop'
 
             $deployScript = Get-ChildItem -Path $DeployRoot -Filter 'Deploy.ps1' -File | Select-Object -First 1
@@ -375,6 +444,10 @@ Task RunDeployScript -Depends GetCredential, StageDeployment -PreCondition { -no
 
             # Ensure this process allows running the deploy script (temporary for this process only)
             Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+
+            $deployArgs = @{ SettingsFile = $SettingsPath; Verbose = $true }
+            if ($CertPassword) { $deployArgs.CertPassword = $CertPassword }
+            if ($ServicePassword) { $deployArgs.ServicePassword = $ServicePassword }
 
             if ($Edition -eq 'PowerShell7')
             {
@@ -386,8 +459,28 @@ Task RunDeployScript -Depends GetCredential, StageDeployment -PreCondition { -no
                     throw 'DeployEdition PowerShell7 was requested but pwsh.exe is not on the VM. Install PowerShell 7 there, or run with the default WindowsPowerShell edition.'
                 }
                 Write-Host "Executing $($deployScript.FullName) under $($pwsh.Source)..."
-                $deployResult = & $pwsh.Source -NoProfile -ExecutionPolicy Bypass `
-                    -File $deployScript.FullName -SettingsFile $SettingsPath -Verbose 2>&1
+                # A SecureString can't cross a process command line, so the child rebuilds
+                # each password from an environment variable that only it inherits, and
+                # that is removed again straight after. Test lab only.
+                $command = "& '$($deployScript.FullName)' -SettingsFile '$SettingsPath' -Verbose"
+                if ($CertPassword)
+                {
+                    $env:WEBJEA_TEST_CERTPASSWORD = [Net.NetworkCredential]::new('', $CertPassword).Password
+                    $command += ' -CertPassword (ConvertTo-SecureString $env:WEBJEA_TEST_CERTPASSWORD -AsPlainText -Force)'
+                }
+                if ($ServicePassword)
+                {
+                    $env:WEBJEA_TEST_SERVICEPASSWORD = [Net.NetworkCredential]::new('', $ServicePassword).Password
+                    $command += ' -ServicePassword (ConvertTo-SecureString $env:WEBJEA_TEST_SERVICEPASSWORD -AsPlainText -Force)'
+                }
+                try
+                {
+                    $deployResult = & $pwsh.Source -NoProfile -ExecutionPolicy Bypass -Command $command 2>&1
+                }
+                finally
+                {
+                    Remove-Item -Path env:WEBJEA_TEST_CERTPASSWORD, env:WEBJEA_TEST_SERVICEPASSWORD -ErrorAction SilentlyContinue
+                }
                 # A child process reports failure through its exit code, not a thrown error.
                 if ($LASTEXITCODE -ne 0)
                 {
@@ -398,7 +491,7 @@ Task RunDeployScript -Depends GetCredential, StageDeployment -PreCondition { -no
             else
             {
                 Write-Host "Executing $($deployScript.FullName) under Windows PowerShell $($PSVersionTable.PSVersion)..."
-                $deployResult = & $deployScript.FullName -SettingsFile $SettingsPath -Verbose
+                $deployResult = & $deployScript.FullName @deployArgs
                 $engine = "Windows PowerShell $($PSVersionTable.PSVersion)"
             }
 
@@ -408,7 +501,7 @@ Task RunDeployScript -Depends GetCredential, StageDeployment -PreCondition { -no
                 Engine       = $engine
                 Output       = $deployResult | Out-String
             }
-        } -ArgumentList $script:stagedDeployRoot, $script:stagedSettingsPath, $script:deployEdition
+        } -ArgumentList $script:stagedDeployRoot, $script:stagedSettingsPath, $script:deployEdition, $script:testCertPassword, $servicePassword
 
         write-host ($result | convertto-json -depth 5)
         Assert $result.Success "Deployment failed: $($result.Output)"

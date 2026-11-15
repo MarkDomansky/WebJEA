@@ -98,7 +98,7 @@ Anything in `appsettings.json` can be overridden with environment variables usin
 
 The recommended setup is a TLS-terminating reverse proxy (nginx, Traefik, YARP, an ingress controller) in front of the container, forwarding to port 8080. The proxy handles the 80→443 redirect in that case.
 
-If you expose the container directly and terminate TLS in Kestrel, configure it through standard Kestrel configuration. WebJEA has no listener or certificate settings of its own (the Windows service uses the same native `Kestrel:Endpoints` configuration, written by `Deploy.ps1`). Use `ASPNETCORE_URLS` plus `Kestrel__Certificates__Default__*`:
+If you expose the container directly and terminate TLS in Kestrel, configure it through standard Kestrel configuration. WebJEA has no listener or certificate settings of its own (the Windows service uses the same native `Kestrel:Endpoints` configuration, written by `Deploy.ps1` — its `CertPath` mode is this same PFX-file setup). Kestrel reloads the PFX when the file changes, so a renewed certificate written to the mounted path is picked up without restarting the container. Use `ASPNETCORE_URLS` plus `Kestrel__Certificates__Default__*`:
 
 ```yaml
 environment:

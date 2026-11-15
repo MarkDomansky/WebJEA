@@ -12,6 +12,7 @@ WebJEA dynamically builds web forms for any PowerShell script — parsing the sc
 ## Deployment and hosting
 
 * [Deployment guide](deployment-migration.md) — the Windows service (`Deploy.ps1`) and migrating from the classic IIS/WebForms releases
+* [Certificate Renewal](Certificate-Renewal.md) — PFX file (`CertPath`, for ACME clients) or machine store (`CertSubject`), and what each needs on renewal
 * [Docker](docker.md) — Linux container images
 
 ## Authentication

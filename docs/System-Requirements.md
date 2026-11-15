@@ -13,36 +13,46 @@ Nothing to install: WebJEA hosts **PowerShell 7** in-process, and the engine shi
 
 ## Service account
 
-We strongly recommend a **gMSA** (group Managed Service Account) to run the WebJEA Windows service. A standard user account with a password also works — `Deploy.ps1` supports both via the `ServiceUserName`/`ServicePassword` settings. Scripts execute in the context of this account, so grant it only the permissions your scripts need. For Windows authentication mode, the account must be able to read AD to resolve group membership ([windows.md](windows.md)).
+We strongly recommend a **gMSA** (group Managed Service Account) to run the WebJEA Windows service. A standard user account with a password also works — set `ServiceUserName`, and pass the password to `Deploy.ps1` with `-ServicePassword` (passwords are never stored in the settings file). Scripts execute in the context of this account, so grant it only the permissions your scripts need. For Windows authentication mode, the account must be able to read AD to resolve group membership ([windows.md](windows.md)).
 
 **The service account does not need to be a local administrator.** The one thing that historically pushed people into granting it admin rights is the HTTPS certificate's private key; `Deploy.ps1` handles that directly — see below.
 
 ## Certificate (recommended)
 
-A certificate is not technically required (HTTP-only installs are possible), but if you pass sensitive data to or from users you may be exposing it to untrusted networks. Enabling the HTTPS listener requires a certificate in the `LocalMachine\My` store that:
+A certificate is not technically required (HTTP-only installs are possible), but if you pass sensitive data to or from users you may be exposing it to untrusted networks. WebJEA reads the HTTPS certificate from one of two places — a **PFX file** (`CertPath`, best for ACME certificates that renew every month or two) or the **`LocalMachine\My` store** (`CertSubject`, best for internal CA certificates). [Certificate Renewal](Certificate-Renewal.md) compares them and covers renewing each.
 
-* is imported **with its private key** — a public-key-only certificate cannot complete a TLS handshake;
-* covers every host name users browse to in its subject or SANs (wildcard SANs count);
-* allows **Server Authentication** (or has no enhanced key usage restriction at all);
-* is in date; and
-* is **trusted by this server** — its chain builds to a root in the machine's trust store and its revocation status can be checked. Certificates from an internal enterprise CA qualify once that CA's chain is installed, which domain-joined servers normally receive through Group Policy.
+Kestrel can only serve a certificate that:
 
-`Deploy.ps1` checks all of these before it changes anything, and stops with the reason when one fails. For a lab or self-signed certificate, set `AllowUntrustedCert` to `true`: the trust check becomes a warning (and Kestrel is told to accept the certificate), while the other checks still apply.
+* has its **private key** — a public-key-only certificate cannot complete a TLS handshake; and
+* allows **Server Authentication** (or has no enhanced key usage restriction at all).
+
+`Deploy.ps1` checks the certificate before it changes anything and stops if either is missing, or if a PFX can't be opened. Everything else is your call, so `Deploy.ps1` **warns and carries on** when the certificate:
+
+* is not **trusted by this server** — its chain doesn't build to a root in the machine's trust store, or its revocation status can't be checked. Certificates from an internal enterprise CA are trusted once that CA's chain is installed, which domain-joined servers normally receive through Group Policy;
+* is out of date, or expires within 30 days; or
+* doesn't cover every host name in `SiteFQDNs` in its subject or SANs (wildcard SANs count).
+
+Browsers will complain about each of these, so a warning usually means something to fix — but a lab or self-signed certificate deploys without any extra setting.
 
 ### How the certificate is selected
 
-WebJEA uses Kestrel's built-in certificate configuration: the `CertSubject` setting is written to `Kestrel:Endpoints:Https:Certificate:Subject`, and Kestrel picks the certificate itself every time the service starts. Kestrel looks for certificates whose **subject contains** that text (case-insensitive; SANs are not searched), skips any without Server Authentication or a private key — and, unless `AllowUntrustedCert` is set, any that are untrusted or out of date — then serves the one with the **latest expiry date**.
+WebJEA uses Kestrel's built-in certificate configuration, written to `Kestrel:Endpoints:Https:Certificate`:
 
-Because of that, a renewed certificate with the same subject takes over on the next service restart, without any settings change. Keep `CertSubject` specific enough to match only the certificates you intend: `example.com` would also match `CN=intranet.example.com`. `Deploy.ps1` warns when the matches have different subjects.
+* **`CertPath`** is written as `Path` (plus `Password` for a protected PFX). Kestrel loads that file, and loads it again whenever the file changes — so a renewal written to the same path is served to new connections without a restart.
+* **`CertSubject`** is written as `Subject`, and Kestrel picks the certificate itself every time the service starts. It looks for certificates whose **subject contains** that text (case-insensitive; SANs are not searched), skips any without Server Authentication or a private key it can open, then serves the one with the **latest expiry date**. `AllowInvalid` is always set, so an untrusted certificate is still served, and — more importantly — an unreachable revocation server at startup can't stop HTTPS from starting.
+
+With `CertSubject`, a renewed certificate with the same subject takes over on the next service restart, without any settings change. Because the latest expiry wins regardless of trust, a self-signed certificate imported with the same subject would be served over a valid one; `Deploy.ps1` warns when that is the case. Keep `CertSubject` specific enough to match only the certificates you intend: `example.com` would also match `CN=intranet.example.com`. `Deploy.ps1` also warns when the matches have different subjects.
 
 ### Private key permissions
 
-Putting the certificate in `LocalMachine\My` is not by itself enough for a non-admin service account. The store's contents are readable by everyone, but the *private key file* behind the certificate is created with permissions for `SYSTEM` and the local `Administrators` group only. If the service account cannot read that file, Kestrel cannot open the key and the HTTPS listener fails at startup — which is why running the service as an administrator "fixes" it.
+**With `CertPath`**, the service account needs to read the PFX file. `Deploy.ps1` grants it **Read** on the PFX's folder — the folder rather than the file, because a renewal replaces the file and the new one takes its permissions from the folder. Nothing else about the folder is changed; see [where to put the PFX](Certificate-Renewal.md#where-to-put-the-pfx) for locking it down.
+
+**With `CertSubject`**, putting the certificate in `LocalMachine\My` is not by itself enough for a non-admin service account. The store's contents are readable by everyone, but the *private key file* behind the certificate is created with permissions for `SYSTEM` and the local `Administrators` group only. If the service account cannot read that file, Kestrel cannot open the key and the HTTPS listener fails at startup — which is why running the service as an administrator "fixes" it.
 
 `Deploy.ps1` grants the service account plain **Read** on that file as part of the Service section, so the account can stay an ordinary user. It does this for **every** certificate matching `CertSubject`, not just the one served today. To do it by hand, or to check what is currently granted: `certlm.msc` → the certificate → **All Tasks** → **Manage Private Keys** → Add. For a gMSA, click **Object Types** and tick *Service Accounts* first, or the account will not be found.
 
 > [!IMPORTANT]
-> **On renewal:** a renewed certificate normally has a **new** private key file, which starts out with the default admins-only permissions again. The settings file doesn't change, but after importing the renewed certificate, re-run `.\Deploy.ps1 -SettingsFile .\settings.json -OnlySections Service` (or re-apply the grant manually) **before** the service next restarts. Kestrel will select the renewed certificate on restart, and the HTTPS listener fails if the service account cannot read its key.
+> **On renewal (`CertSubject`):** a renewed certificate normally has a **new** private key file, which starts out with the default admins-only permissions again. Grant the service account read on it **before** the service next restarts — Kestrel selects the renewed certificate on restart, and the HTTPS listener fails if the account cannot read its key. [Certificate Renewal](Certificate-Renewal.md#store-mode-certsubject) has a script for the grant and restart. A `CertPath` PFX needs none of this.
 
 Certificates whose keys live in a TPM, HSM, or smart card have no file to permission this way. `Deploy.ps1` warns and moves on; grant access with that provider's own tooling.
 
@@ -69,7 +79,7 @@ The service account needs this access to the folders in the settings file:
 Because `Deploy.ps1` leaves your permissions alone, it **warns** when one of these folders is open to everyone on the server instead:
 
 * **Write access for a broad group** (Everyone, Authenticated Users, Users, Interactive, Guests, Domain Users) on any of the three. Anyone who can sign in to the server could then change what WebJEA runs: drop a DLL next to `WebJEA.exe`, or edit a script that runs as the service account. Folders created under `C:\` get this by default: Windows Server lets Users create files in subfolders, and Windows 10/11 gives Authenticated Users Modify.
-* **Read access for a broad group** on `SitePath`, once `appsettings.Production.json` holds a secret (for example `AzureAd:ClientSecret`).
+* **Read access for a broad group** on `SitePath`, once `appsettings.Production.json` holds a secret (`AzureAd:ClientSecret`, or the password of a `CertPath` PFX).
 
 To restrict a folder, turn off inheritance and grant only SYSTEM, Administrators and the service account. The well-known SIDs make this work on non-English Windows too:
 

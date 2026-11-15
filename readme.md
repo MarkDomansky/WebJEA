@@ -47,7 +47,7 @@ The main goals for WebJEA:
 The following are recommendations, and are pre-configured in the provided DSC configuration, but are not strictly required.
 
 * SSL Certificate
-* A gMSA (group Managed Service Account) running the WebJEA Windows service (Windows 2008 R2 Forest/Domain functional level).  Read more about MSAs [here](https://technet.microsoft.com/en-us/library/dd560633(v=ws.10).aspx).<br>_You can use a standard AD user account with a password instead — `Deploy.ps1` supports both via the `ServiceUserName`/`ServicePassword` settings, no changes needed._
+* A gMSA (group Managed Service Account) running the WebJEA Windows service (Windows 2008 R2 Forest/Domain functional level).  Read more about MSAs [here](https://technet.microsoft.com/en-us/library/dd560633(v=ws.10).aspx).<br>_You can use a standard AD user account with a password instead — set `ServiceUserName` and pass the password to `Deploy.ps1` with `-ServicePassword`._
 * Active Directory.  AD is not strictly required and limited testing for local users and groups confirms WebJEA works with local users, but they have not been thoroughly tested and are not recommended.
 
 The DSC configuration included allows quick deployment and should be suitable in most environments.
@@ -67,12 +67,12 @@ There are some limitations with WebJEA.  All of these are considered areas for f
 
 The included `Deploy.ps1` installs and configures WebJEA as a self-hosted **Windows service** on Kestrel — no IIS, no prerequisites to install (the release is self-contained).  Running multiple instances (formerly sub-application installs under one IIS site) is now done with one container per instance — see [docs/docker.md](docs/docker.md).  See [docs/deployment-migration.md](docs/deployment-migration.md) for what changed from the WebForms/IIS releases, including how to migrate an existing IIS install.  Check the [Documentation](docs/README.md) for more information.
 
-**Breaking change:** listeners and the HTTPS certificate now use Kestrel's native `Kestrel:Endpoints` configuration, with the certificate selected by subject. In `settings.json`, `CertThumbprint` is replaced by `CertSubject`, and untrusted certificates need `AllowUntrustedCert`. The app no longer reads `WebJEA:HttpPort`/`HttpsPort`/`CertThumbprint`; re-run `Deploy.ps1` to migrate. See [docs/deployment-migration.md](docs/deployment-migration.md).
+**Breaking change:** listeners and the HTTPS certificate now use Kestrel's native `Kestrel:Endpoints` configuration, with the certificate selected by subject. In `settings.json`, `CertThumbprint` is replaced by `CertSubject`, or by `CertPath` for a PFX file that Kestrel reloads on renewal (best for ACME certificates). The app no longer reads `WebJEA:HttpPort`/`HttpsPort`/`CertThumbprint`; re-run `Deploy.ps1` to migrate. Passwords are no longer read from `settings.json`: pass a regular service account's password with `-ServicePassword` (and a PFX password with `-CertPassword`). See [docs/deployment-migration.md](docs/deployment-migration.md) and [docs/Certificate-Renewal.md](docs/Certificate-Renewal.md).
 
 Installation Steps:
 1. Build a server, get a certificate, create a managed service account (gMSA).
 2. Go to [Releases](https://github.com/markdomansky/WebJEA/releases), download and extract the latest release.
-3. Copy `settings.template.json` to e.g. `settings.json` and fill in the machine/site name, certificate subject, service account, ports, and deployment folders — see [docs/Installation.md](docs/Installation.md).
+3. Copy `settings.template.json` to e.g. `settings.json` and fill in the machine/site name, certificate (subject or PFX path), service account, ports, and deployment folders — see [docs/Installation.md](docs/Installation.md).
 4. From an elevated prompt — Windows PowerShell 5.1 (`powershell.exe`) or PowerShell 7 (`pwsh`) — run `.\Deploy.ps1 -SettingsFile .\settings.json`. This copies the release, and creates and starts the WebJEA Windows service.
 5. Reboot should not be needed, but is recommended following first deployment.
 
