@@ -35,11 +35,15 @@ param (
     #to the release. -ServicePassword: for a regular (non-gMSA) ServiceUserName; needed
     #on the first deploy or when the account or its password changes. -CertPassword: for
     #a password-protected PFX at CertPath; later deploys reuse the stored one.
+    #-GraphCertPassword: the same, for the Graph client certificate PFX at GraphCertPath.
     [Parameter()]
     [securestring]$ServicePassword,
 
     [Parameter()]
-    [securestring]$CertPassword
+    [securestring]$CertPassword,
+
+    [Parameter()]
+    [securestring]$GraphCertPassword
 )
 begin
 {
@@ -150,8 +154,13 @@ begin
                     $parent = $parent.$key
                 }
                 #Stored through a JSON round-trip so it has the same shape (pscustomobject,
-                #not hashtable) the TestScript reads back.
-                $parent | Add-Member -NotePropertyName $KeyPath[-1] -NotePropertyValue ($desired | ConvertFrom-Json) -Force
+                #not hashtable) the TestScript reads back. An array value (ClientCredentials)
+                #is re-collected with @(): pwsh 7 enumerates a one-element array out of
+                #ConvertFrom-Json (it would be written as a bare object), and 5.1 hands back a
+                #wrapped array that ConvertTo-Json writes as {"value":[...],"Count":1}.
+                $stored = $desired | ConvertFrom-Json
+                if ($Value -is [array]) { $stored = @($stored) }
+                $parent | Add-Member -NotePropertyName $KeyPath[-1] -NotePropertyValue $stored -Force
                 $json | ConvertTo-Json -Depth 10 | Set-Content -Path $path -Encoding UTF8
             }.GetNewClosure()
         }
@@ -383,6 +392,70 @@ begin
         }
     }
 
+    function Step_CertKeyAccess([System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate, [string]$Account, [string]$Failure)
+    {
+        #Gives the service account Read on the private key file behind one certificate in
+        #LocalMachine\My. The store is readable by everyone, but the key file is ACL'd to
+        #SYSTEM and local Administrators only, and renewing a certificate produces a NEW key
+        #file with those defaults again - so this is checked on every deploy. Captured by
+        #thumbprint. $Failure says what breaks without it (the HTTPS listener, Graph calls).
+        $thumbprint = $Certificate.Thumbprint
+        $certLabel = "$thumbprint ('$($Certificate.Subject)', expires $($Certificate.NotAfter.ToString('yyyy-MM-dd')))"
+
+        #GetNewClosure() rebinds these scriptblocks to a new dynamic module whose scope
+        #chain reaches the global scope but NOT this script's, so the two helpers below
+        #cannot be called by name from inside them - the closure dies at run time with
+        #CommandNotFoundException. Capture each function's scriptblock in a variable
+        #(closures do copy those) and invoke it with &. Same class of GetNewClosure
+        #scoping trap as $skipSpn in the Service section.
+        $getKeyPath = ${function:GetCertPrivateKeyPath}
+        $getAccountSid = ${function:ResolveAccountSid}
+        @{
+            Description = "$Account can read the private key of certificate $certLabel"
+            TestScript  = {
+                $cert = Get-Item -Path "Cert:\LocalMachine\My\$thumbprint" -ErrorAction SilentlyContinue
+                if (-not $cert) { return $false }
+
+                $keyPath = & $getKeyPath -Cert $cert
+                #No file to ACL - a hardware/smart-card/ephemeral provider, or a key
+                #kept outside the standard machine key folders. Report the step as
+                #satisfied rather than block the deploy on something this script cannot
+                #fix, but say plainly what it means for the account.
+                if (-not $keyPath)
+                {
+                    Write-Warning "Certificate $thumbprint has no private key file in the standard machine key folders (hardware, smart-card or ephemeral provider). Its permissions cannot be managed here - grant $Account read access with that provider's own tooling, or $Failure unless the account is a local administrator."
+                    return $true
+                }
+
+                #Read the ACEs as SIDs: the key file's ACL routinely contains entries
+                #for accounts that no longer resolve to a name, and translating those
+                #for comparison would throw mid-enumeration.
+                $sid = & $getAccountSid -Account $Account
+                $read = [System.Security.AccessControl.FileSystemRights]::Read
+                $rules = (Get-Acl -Path $keyPath).GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])
+                return [bool]($rules | Where-Object {
+                        $_.IdentityReference.Value -eq $sid.Value -and
+                        $_.AccessControlType -eq 'Allow' -and
+                        ($_.FileSystemRights -band $read) -eq $read
+                    })
+            }.GetNewClosure()
+            SetScript   = {
+                $cert = Get-Item -Path "Cert:\LocalMachine\My\$thumbprint"
+                $keyPath = & $getKeyPath -Cert $cert
+                $sid = & $getAccountSid -Account $Account
+
+                #Read, not Full Control: the service only ever reads the key, and a
+                #writable ACE would let a compromised service account replace it.
+                #The rule is written against the SID so it survives the account being
+                #renamed and does not depend on name resolution at apply time.
+                $acl = Get-Acl -Path $keyPath
+                $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
+                            $sid, [System.Security.AccessControl.FileSystemRights]::Read, 'Allow')))
+                Set-Acl -Path $keyPath -AclObject $acl
+            }.GetNewClosure()
+        }
+    }
+
     function GetSteps_AppConfig($Settings)
     {
         ##################################################
@@ -440,6 +513,46 @@ begin
         if ($certLabel) { $endpointLabel += " ($certLabel)" }
         Step_AppSettingsValue -SitePath $settings.SitePath -KeyPath 'Kestrel', 'Endpoints' -Value $endpoints `
             -Label "Kestrel.Endpoints = $endpointLabel"
+
+        #Graph client certificate (Entra mode), only when the settings file names one: with
+        #neither key set, AzureAd is the admin's (a client secret, env vars, hand-written
+        #JSON) and is left alone. Microsoft.Identity.Web's own credential list, so:
+        # - GraphCertSubject: the currently valid exact-DN match in LocalMachine\My with the
+        #   latest NotBefore, looked up when the app starts - a renewal imported with the
+        #   same subject is used after the next restart.
+        # - GraphCertPath: a PFX read once at startup (no reload on change), with an
+        #   ephemeral key, so the folder read access is all the account needs.
+        #The whole array is replaced, so nothing from the other mode lingers; TenantId,
+        #ClientId and the rest of AzureAd are untouched.
+        $hasGraphCertSubject = -not [string]::IsNullOrWhiteSpace([string]$settings.GraphCertSubject)
+        $hasGraphCertPath = -not [string]::IsNullOrWhiteSpace([string]$settings.GraphCertPath)
+        if ($hasGraphCertSubject -or $hasGraphCertPath)
+        {
+            if ($hasGraphCertPath)
+            {
+                $credential = [ordered]@{
+                    SourceType          = 'Path'
+                    CertificateDiskPath = [string]$settings.GraphCertPath
+                }
+                $graphLabel = "certificate file '$($settings.GraphCertPath)'"
+                if (-not [string]::IsNullOrEmpty($settings.ResolvedGraphCertPassword))
+                {
+                    $credential.CertificatePassword = [string]$settings.ResolvedGraphCertPassword
+                    $graphLabel += ', password set' #never the password itself
+                }
+            }
+            else
+            {
+                $credential = [ordered]@{
+                    SourceType                   = 'StoreWithDistinguishedName'
+                    CertificateStorePath         = 'LocalMachine/My'
+                    CertificateDistinguishedName = [string]$settings.GraphCertSubject
+                }
+                $graphLabel = "certificate subject '$($settings.GraphCertSubject)'"
+            }
+            Step_AppSettingsValue -SitePath $settings.SitePath -KeyPath 'AzureAd', 'ClientCredentials' -Value @($credential) `
+                -Label "AzureAd.ClientCredentials = $graphLabel"
+        }
 
         #Earlier alphas configured the listeners through these WebJEA keys. The app now
         #refuses to start while any of them is present, so an upgrade removes them.
@@ -560,81 +673,47 @@ begin
         Step_UserRight -Constant 'SeServiceLogonRight' -Account $account `
             -Sid $accountSid -Label 'Logon as a Service'
 
-        #A PFX certificate is read by Kestrel straight from its folder - which belongs to the
-        #ACME client, so only the read access is added, nothing else changed. Folder, not
-        #file: a renewal replaces the file, and the replacement inherits from the folder.
+        #A PFX certificate is read straight from its folder - which belongs to the ACME
+        #client (or the admin), so only the read access is added, nothing else changed.
+        #Folder, not file: a renewal replaces the file, and the replacement inherits from
+        #the folder. Kestrel reads CertPath; Microsoft.Identity.Web reads GraphCertPath (with
+        #an ephemeral key, so no key-folder access is needed). Both in one folder is fine:
+        #the second grant finds the first one already there.
+        $pfxFolders = @()
         if ([int]$settings.HttpsPort -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$settings.CertPath))
         {
-            Step_FolderAccess -Path (Split-Path -Path $settings.CertPath -Parent) -Account $account -Sid $accountSid -Rights 'Read' -Label 'read'
+            $pfxFolders += Split-Path -Path $settings.CertPath -Parent
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$settings.GraphCertPath))
+        {
+            $pfxFolders += Split-Path -Path $settings.GraphCertPath -Parent
+        }
+        foreach ($pfxFolder in @($pfxFolders | Select-Object -Unique))
+        {
+            Step_FolderAccess -Path $pfxFolder -Account $account -Sid $accountSid -Rights 'Read' -Label 'read'
         }
 
-        #Serving HTTPS takes more than putting the certificate in LocalMachine\My: that
-        #store is readable by everyone, but the private key file behind the certificate is
-        #ACL'd to SYSTEM and local Administrators only. That single ACL is the reason a
-        #WebJEA service account would otherwise have to be a local administrator - without
-        #it Kestrel cannot open the key and the HTTPS listener fails at startup. Grant the
-        #account plain Read on that file instead. Checked on every deploy because renewing a
-        #certificate produces a NEW key file with the default permissions again.
-        #Kestrel picks the certificate itself at startup (the CertSubject match that expires
-        #last), so grant on EVERY certificate whose subject matches (ValidateSettings collected
-        #them as CertMatches): a renewal that is already imported then works on the next
-        #restart. Store mode only; with CertPath, CertMatches is empty.
-        foreach ($matchedCert in @($settings.CertMatches))
+        #A certificate in LocalMachine\My is only usable once the account can read its
+        #private key file (Step_CertKeyAccess). That single ACL is the reason a WebJEA
+        #service account would otherwise have to be a local administrator.
+        #Grant on EVERY certificate that matches (ValidateSettings collected them), not just
+        #the one in use today, so a renewal that is already imported works on the next
+        #restart:
+        # - CertMatches: Kestrel picks the CertSubject match that expires last. Empty with
+        #   CertPath.
+        # - GraphCertMatches: Microsoft.Identity.Web picks the valid exact-DN match with the
+        #   latest NotBefore. Empty unless GraphCertSubject is set.
+        #A certificate used for both gets one step.
+        $keyThumbprints = @{}
+        foreach ($use in @(
+                @{ Certs = $settings.CertMatches; Failure = 'the HTTPS listener will fail to start' }
+                @{ Certs = $settings.GraphCertMatches; Failure = 'Microsoft Graph calls (group overage, display names, revalidation) will fail' }))
         {
-            $thumbprint = $matchedCert.Thumbprint
-            $certLabel = "$thumbprint ('$($matchedCert.Subject)', expires $($matchedCert.NotAfter.ToString('yyyy-MM-dd')))"
-
-            #GetNewClosure() rebinds these scriptblocks to a new dynamic module whose scope
-            #chain reaches the global scope but NOT this script's, so the two helpers below
-            #cannot be called by name from inside them - the closure dies at run time with
-            #CommandNotFoundException. Capture each function's scriptblock in a variable
-            #(closures do copy those) and invoke it with &. Same class of GetNewClosure
-            #scoping trap as $skipSpn further down.
-            $getKeyPath = ${function:GetCertPrivateKeyPath}
-            $getAccountSid = ${function:ResolveAccountSid}
-            @{
-                Description = "$account can read the private key of certificate $certLabel"
-                TestScript  = {
-                    $cert = Get-Item -Path "Cert:\LocalMachine\My\$thumbprint" -ErrorAction SilentlyContinue
-                    if (-not $cert) { return $false }
-
-                    $keyPath = & $getKeyPath -Cert $cert
-                    #No file to ACL - a hardware/smart-card/ephemeral provider, or a key
-                    #kept outside the standard machine key folders. Report the step as
-                    #satisfied rather than block the deploy on something this script cannot
-                    #fix, but say plainly what it means for the account.
-                    if (-not $keyPath)
-                    {
-                        Write-Warning "Certificate $thumbprint has no private key file in the standard machine key folders (hardware, smart-card or ephemeral provider). Its permissions cannot be managed here - grant $account read access with that provider's own tooling, or the HTTPS listener will fail to start unless the account is a local administrator."
-                        return $true
-                    }
-
-                    #Read the ACEs as SIDs: the key file's ACL routinely contains entries
-                    #for accounts that no longer resolve to a name, and translating those
-                    #for comparison would throw mid-enumeration.
-                    $sid = & $getAccountSid -Account $account
-                    $read = [System.Security.AccessControl.FileSystemRights]::Read
-                    $rules = (Get-Acl -Path $keyPath).GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])
-                    return [bool]($rules | Where-Object {
-                            $_.IdentityReference.Value -eq $sid.Value -and
-                            $_.AccessControlType -eq 'Allow' -and
-                            ($_.FileSystemRights -band $read) -eq $read
-                        })
-                }.GetNewClosure()
-                SetScript   = {
-                    $cert = Get-Item -Path "Cert:\LocalMachine\My\$thumbprint"
-                    $keyPath = & $getKeyPath -Cert $cert
-                    $sid = & $getAccountSid -Account $account
-
-                    #Read, not Full Control: the service only ever reads the key, and a
-                    #writable ACE would let a compromised service account replace it.
-                    #The rule is written against the SID so it survives the account being
-                    #renamed and does not depend on name resolution at apply time.
-                    $acl = Get-Acl -Path $keyPath
-                    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
-                                $sid, [System.Security.AccessControl.FileSystemRights]::Read, 'Allow')))
-                    Set-Acl -Path $keyPath -AclObject $acl
-                }.GetNewClosure()
+            foreach ($matchedCert in @($use.Certs | Where-Object { $_ }))
+            {
+                if ($keyThumbprints.ContainsKey($matchedCert.Thumbprint)) { continue }
+                $keyThumbprints[$matchedCert.Thumbprint] = $true
+                Step_CertKeyAccess -Certificate $matchedCert -Account $account -Failure $use.Failure
             }
         }
 
@@ -1124,6 +1203,86 @@ begin
         #quick helper function
         function Assert($Condition, $Message) { if (-not $Condition) { throw $Message } }
 
+        #A PFX setting (CertPath, GraphCertPath): the file must exist and open, and where it
+        #lives matters. Returns @{ Cert; Password }; the caller checks the certificate for
+        #its own use and must Reset() it. $Stored is the password an earlier deploy wrote to
+        #appsettings.Production.json (already plain text there). $OtherPfx is the other
+        #WebJEA PFX, which may share the folder.
+        function ResolvePfx([string]$Path, [securestring]$Password, [string]$Stored,
+            [string]$SettingName, [string]$ParamName, [string]$Example, [string]$Missing, [string]$OtherPfx)
+        {
+            Assert ($Path -match '^([A-Za-z]:\\|\\\\)') "$SettingName '$Path' must be a full path to the PFX file, e.g. $Example."
+            Assert (Test-Path -LiteralPath $Path -PathType Leaf) "$SettingName '$Path' does not exist. $Missing"
+
+            #Password: the parameter when given (it must work); otherwise the one stored by
+            #an earlier deploy, so re-runs don't need it again; otherwise none.
+            $candidates = @()
+            if ($Password)
+            {
+                $candidates += , @($ParamName, [System.Net.NetworkCredential]::new('', $Password).Password)
+            }
+            else
+            {
+                if ($Stored) { $candidates += , @('the password stored by an earlier deploy', $Stored) }
+                $candidates += , @('no password', '')
+            }
+            $cert = $null
+            $resolved = $null
+            $openError = $null
+            foreach ($candidate in $candidates)
+            {
+                try
+                {
+                    $cert = OpenPfx -Path $Path -Password $candidate[1]
+                    $resolved = $candidate[1]
+                    Write-Verbose "$SettingName opened with $($candidate[0])."
+                    break
+                }
+                catch
+                {
+                    #Unwrap PowerShell's 'Exception calling ".ctor"...' to the crypto message.
+                    $openError = if ($_.Exception.InnerException) { $_.Exception.InnerException.Message.Trim() } else { $_.Exception.Message }
+                }
+            }
+            if (-not $cert)
+            {
+                if ($Password) { throw "The PFX at $SettingName '$Path' could not be opened with ${ParamName}: $openError" }
+                throw "The PFX at $SettingName '$Path' could not be opened without a password ($openError). Pass its password with $ParamName (e.g. $ParamName (Read-Host -AsSecureString)); later deploys reuse it."
+            }
+
+            try
+            {
+                #Where the file lives matters: the service account must not be able to swap
+                #its own certificate, and upgrades must not touch it.
+                $folder = Split-Path -Path $Path -Parent
+                foreach ($owned in @(
+                        @{ Label = 'SitePath'; Path = $settings.SitePath; Why = 'upgrades replace the site folder' }
+                        @{ Label = 'ScriptsPath'; Path = $settings.ScriptsPath; Why = 'script authors may be able to write there' }
+                        @{ Label = 'LogPath'; Path = $settings.LogPath; Why = 'the service account can write there, so it could replace its own certificate' }))
+                {
+                    if (($folder + '\').StartsWith($owned.Path + '\', [StringComparison]::OrdinalIgnoreCase))
+                    {
+                        Write-Warning "$SettingName '$Path' is inside $($owned.Label) - $($owned.Why). Keep the PFX in its own folder, e.g. C:\webjea\tls (see docs/Certificate-Renewal.md#where-to-put-the-pfx)."
+                    }
+                }
+                #Read access only matters when there is no password between a reader and the key.
+                $warning = GetBroadAccessWarnings -Path $folder -Label "The $SettingName folder" -WarnOnRead:([string]::IsNullOrEmpty($resolved))
+                if ($warning) { Write-Warning $warning }
+                $otherKeys = @(Get-ChildItem -LiteralPath $folder -File -ErrorAction SilentlyContinue |
+                        Where-Object { $_.Extension -in '.pfx', '.p12', '.key', '.pem' -and $_.FullName -ne $Path -and $_.FullName -ne $OtherPfx })
+                if ($otherKeys.Count -gt 0)
+                {
+                    Write-Warning "The $SettingName folder '$folder' also holds $($otherKeys.Name -join ', '). The service account is granted read on the whole folder, so keep only WebJEA's PFX files there."
+                }
+            }
+            catch
+            {
+                $cert.Reset()
+                throw
+            }
+            return @{ Cert = $cert; Password = $resolved }
+        }
+
         #Reject IIS-era settings files outright: this version hosts as a Windows service.
         $retiredKeys = @('SiteName', 'AppPoolName', 'AppPoolUserName', 'AppPoolPassword',
             'AppPoolLoadUserProfile', 'DisableDefaultWebsite', 'AppName', 'ParentSiteName')
@@ -1167,6 +1326,8 @@ begin
             'Pass it with -ServicePassword instead (e.g. -ServicePassword (Read-Host -AsSecureString)) so it is not stored in the settings file, and remove the key.')
         Assert (-not $Settings.PSObject.Properties['CertPassword']) ('The settings file contains CertPassword. ' +
             'Pass it with -CertPassword instead (e.g. -CertPassword (Read-Host -AsSecureString)) so it is not stored in the settings file, and remove the key.')
+        Assert (-not $Settings.PSObject.Properties['GraphCertPassword']) ('The settings file contains GraphCertPassword. ' +
+            'Pass it with -GraphCertPassword instead (e.g. -GraphCertPassword (Read-Host -AsSecureString)) so it is not stored in the settings file, and remove the key.')
 
         #verify the service account: a gMSA has no password; a regular account needs one
         #unless the service already runs as it (a re-deploy keeps the stored credential)
@@ -1219,6 +1380,21 @@ begin
             Assert ($hasCertSubject -or $hasCertPath) ('HttpsPort is enabled but no certificate is set: set CertSubject (a certificate in LocalMachine\My) ' +
                 'or CertPath (a PFX file, recommended for ACME certificates).')
             Assert (-not ($hasCertSubject -and $hasCertPath)) 'Set only one of CertSubject (a certificate in LocalMachine\My) and CertPath (a PFX file); leave the other empty.'
+        }
+        #The Graph client certificate (Entra mode) is optional and independent of the ports:
+        #the machine store (GraphCertSubject), a PFX file (GraphCertPath), or neither - then
+        #AzureAd is configured by hand and left alone. Settings files from before these keys
+        #existed simply have neither.
+        $hasGraphCertSubject = -not [string]::IsNullOrWhiteSpace([string]$settings.GraphCertSubject)
+        $hasGraphCertPath = -not [string]::IsNullOrWhiteSpace([string]$settings.GraphCertPath)
+        Assert (-not ($hasGraphCertSubject -and $hasGraphCertPath)) ('Set only one of GraphCertSubject (a certificate in LocalMachine\My) and GraphCertPath (a PFX file); ' +
+            'leave the other empty, or both empty to configure AzureAd yourself.')
+        #Trimmed once here: what is checked is what the AppConfig step writes.
+        if ($hasGraphCertSubject) { $settings.GraphCertSubject = $settings.GraphCertSubject.Trim() }
+        if ($hasGraphCertPath) { $settings.GraphCertPath = $settings.GraphCertPath.Trim() }
+        if ($GraphCertPassword -and -not $hasGraphCertPath)
+        {
+            Write-Warning '-GraphCertPassword is ignored: it is only used with GraphCertPath.'
         }
         #Retired, but harmless: Kestrel is now always allowed to serve the certificate it
         #finds, and trust problems are warnings. Keep old settings files deploying.
@@ -1316,46 +1492,13 @@ begin
             #an ACME client renewing it in place needs no restart and no key permissions.
             $certPath = $settings.CertPath.Trim()
             $settings.CertPath = $certPath #written to Kestrel:Endpoints as-is
-            Assert ($certPath -match '^([A-Za-z]:\\|\\\\)') "CertPath '$certPath' must be a full path to the PFX file, e.g. C:\webjea\tls\webjea.pfx."
-            Assert (Test-Path -LiteralPath $certPath -PathType Leaf) "CertPath '$certPath' does not exist. Point it at the PFX file your ACME client (or you) writes - see docs/Certificate-Renewal.md."
-
-            #Password: -CertPassword when given (it must work); otherwise the one stored by
-            #an earlier deploy, so re-runs don't need it again; otherwise none.
-            $candidates = @()
-            if ($CertPassword)
-            {
-                $candidates += , @('-CertPassword', [System.Net.NetworkCredential]::new('', $CertPassword).Password)
-            }
-            else
-            {
-                $stored = $null
-                if ($appSettings -and $appSettings.PSObject.Properties['Kestrel']) { $stored = [string]$appSettings.Kestrel.Endpoints.Https.Certificate.Password }
-                if ($stored) { $candidates += , @('the password stored by an earlier deploy', $stored) }
-                $candidates += , @('no password', '')
-            }
-            $cert = $null
-            $openError = $null
-            foreach ($candidate in $candidates)
-            {
-                try
-                {
-                    $cert = OpenPfx -Path $certPath -Password $candidate[1]
-                    $resolvedCertPassword = $candidate[1]
-                    Write-Verbose "CertPath opened with $($candidate[0])."
-                    break
-                }
-                catch
-                {
-                    #Unwrap PowerShell's 'Exception calling ".ctor"...' to the crypto message.
-                    $openError = if ($_.Exception.InnerException) { $_.Exception.InnerException.Message.Trim() } else { $_.Exception.Message }
-                }
-            }
-            if (-not $cert)
-            {
-                if ($CertPassword) { throw "The PFX at CertPath '$certPath' could not be opened with -CertPassword: $openError" }
-                throw "The PFX at CertPath '$certPath' could not be opened without a password ($openError). Pass its password with -CertPassword (e.g. -CertPassword (Read-Host -AsSecureString)); later deploys reuse it."
-            }
-
+            $stored = $null
+            if ($appSettings -and $appSettings.PSObject.Properties['Kestrel']) { $stored = [string]$appSettings.Kestrel.Endpoints.Https.Certificate.Password }
+            $pfx = ResolvePfx -Path $certPath -Password $CertPassword -Stored $stored -SettingName 'CertPath' -ParamName '-CertPassword' `
+                -Example 'C:\webjea\tls\webjea.pfx' -Missing 'Point it at the PFX file your ACME client (or you) writes - see docs/Certificate-Renewal.md.' `
+                -OtherPfx $settings.GraphCertPath
+            $cert = $pfx.Cert
+            $resolvedCertPassword = $pfx.Password
             try
             {
                 $certLabel = "Certificate $($cert.Thumbprint) '$($cert.Subject)' in '$certPath' (issued by '$($cert.Issuer)', expires $($cert.NotAfter.ToString('yyyy-MM-dd')))"
@@ -1369,29 +1512,6 @@ begin
                 #behind on older .NET Framework versions.
                 $cert.Reset()
             }
-
-            #Where the file lives matters: the service account must not be able to swap
-            #its own certificate, and upgrades must not touch it.
-            $certFolder = Split-Path -Path $certPath -Parent
-            foreach ($owned in @(
-                    @{ Label = 'SitePath'; Path = $settings.SitePath; Why = 'upgrades replace the site folder' }
-                    @{ Label = 'ScriptsPath'; Path = $settings.ScriptsPath; Why = 'script authors may be able to write there' }
-                    @{ Label = 'LogPath'; Path = $settings.LogPath; Why = 'the service account can write there, so it could replace its own certificate' }))
-            {
-                if (($certFolder + '\').StartsWith($owned.Path + '\', [StringComparison]::OrdinalIgnoreCase))
-                {
-                    Write-Warning "CertPath '$certPath' is inside $($owned.Label) - $($owned.Why). Keep the PFX in its own folder, e.g. C:\webjea\tls (see docs/Certificate-Renewal.md#where-to-put-the-pfx)."
-                }
-            }
-            #Read access only matters when there is no password between a reader and the key.
-            $warning = GetBroadAccessWarnings -Path $certFolder -Label 'The CertPath folder' -WarnOnRead:([string]::IsNullOrEmpty($resolvedCertPassword))
-            if ($warning) { Write-Warning $warning }
-            $otherKeys = @(Get-ChildItem -LiteralPath $certFolder -File -ErrorAction SilentlyContinue |
-                    Where-Object { $_.Extension -in '.pfx', '.p12', '.key', '.pem' -and $_.FullName -ne $certPath })
-            if ($otherKeys.Count -gt 0)
-            {
-                Write-Warning "The CertPath folder '$certFolder' also holds $($otherKeys.Name -join ', '). The service account is granted read on the whole folder, so keep only WebJEA's PFX there."
-            }
         }
         #Every match, not just the one Kestrel serves today: the private-key ACL step grants
         #on all of them so an already-imported renewal works on the next restart.
@@ -1399,13 +1519,113 @@ begin
         #Written to Kestrel:Endpoints by the AppConfig step. Never printed.
         $Settings | Add-Member -NotePropertyName ResolvedCertPassword -NotePropertyValue $resolvedCertPassword -Force
 
+        #Graph client certificate. Its trust comes from the public key uploaded to the app
+        #registration, not from a CA, so there is no chain, name or EKU to check - only that
+        #Microsoft.Identity.Web will find one with a usable key. Dates are warnings: sign-in
+        #still works without Graph, but group overage, display names and revalidation do not.
+        function GetGraphCertWarnings([System.Security.Cryptography.X509Certificates.X509Certificate2]$Cert)
+        {
+            $now = Get-Date
+            if ($Cert.NotBefore -gt $now) { return "it is not valid until $($Cert.NotBefore), so Graph calls fail until then" }
+            if ($Cert.NotAfter -lt $now) { return "it expired on $($Cert.NotAfter), so Graph calls will fail" }
+            $daysLeft = [int][Math]::Floor(($Cert.NotAfter - $now).TotalDays)
+            if ($daysLeft -lt 30) { return "it expires in $daysLeft day(s) - renew it and upload the new public key to the app registration before then (docs/Certificate-Renewal.md#graph-client-certificate)" }
+        }
+        $graphCertMatches = @()
+        $resolvedGraphCertPassword = $null
+        if ($hasGraphCertSubject)
+        {
+            $dn = $settings.GraphCertSubject
+            #The exact subject DN, compared case-insensitively - what Microsoft.Identity.Web's
+            #StoreWithDistinguishedName lookup (FindBySubjectDistinguishedName) matches.
+            #Unlike CertSubject, part of the name is not enough.
+            $graphCertMatches = @(Get-ChildItem -Path Cert:\LocalMachine\My |
+                    Where-Object { $_.HasPrivateKey -and $_.Subject -eq $dn } |
+                    Sort-Object -Property NotBefore -Descending)
+            if ($graphCertMatches.Count -eq 0)
+            {
+                $near = @(Get-ChildItem -Path Cert:\LocalMachine\My |
+                        Where-Object { $_.HasPrivateKey -and $_.Subject.IndexOf($dn, [StringComparison]::OrdinalIgnoreCase) -ge 0 } |
+                        ForEach-Object { "'$($_.Subject)'" } | Select-Object -Unique)
+                $hint = if ($near.Count -gt 0) { " Certificates whose subject contains it: $($near -join ', ') - use the whole subject." } else { '' }
+                throw ("No certificate with a private key in LocalMachine\My has the subject '$dn'. GraphCertSubject is the certificate's exact subject (e.g. CN=WebJEA-Graph), not part of it.$hint " +
+                    'Create or import the Graph client certificate (docs/entra-appreg.md#option-a-certificate-recommended), or correct GraphCertSubject.')
+            }
+            #Microsoft.Identity.Web skips matches that are not valid right now and uses the
+            #one issued last (latest NotBefore) of the rest, so that is the one to judge.
+            $now = Get-Date
+            $current = @($graphCertMatches | Where-Object { $_.NotBefore -le $now -and $_.NotAfter -ge $now })
+            if ($current.Count -eq 0)
+            {
+                Write-Warning ("No certificate matching GraphCertSubject '$dn' is valid today (" +
+                    (($graphCertMatches | ForEach-Object { "$($_.Thumbprint) valid $($_.NotBefore.ToString('yyyy-MM-dd')) to $($_.NotAfter.ToString('yyyy-MM-dd'))" }) -join ', ') +
+                    '). Microsoft.Identity.Web only uses a currently valid one, so Graph calls will fail: import a renewed certificate and upload its public key to the app registration (docs/Certificate-Renewal.md#graph-client-certificate).')
+            }
+            else
+            {
+                $graphCert = $current[0]
+                $warning = GetGraphCertWarnings -Cert $graphCert
+                if ($warning) { Write-Warning "Graph client certificate $($graphCert.Thumbprint) '$($graphCert.Subject)': $warning." }
+            }
+        }
+        elseif ($hasGraphCertPath)
+        {
+            #Microsoft.Identity.Web reads the PFX once at startup, with an ephemeral key, so
+            #a replaced file is used after the next restart.
+            $graphCertPath = $settings.GraphCertPath
+            $stored = $null
+            if ($appSettings -and $appSettings.PSObject.Properties['AzureAd'])
+            {
+                $existing = @($appSettings.AzureAd.ClientCredentials | Where-Object { $_ })
+                if ($existing.Count -gt 0 -and $existing[0].SourceType -eq 'Path') { $stored = [string]$existing[0].CertificatePassword }
+            }
+            $pfx = ResolvePfx -Path $graphCertPath -Password $GraphCertPassword -Stored $stored -SettingName 'GraphCertPath' -ParamName '-GraphCertPassword' `
+                -Example 'C:\webjea\tls\webjea-graph.pfx' -Missing 'Point it at the Graph client certificate PFX (docs/entra-appreg.md#option-a-certificate-recommended).' `
+                -OtherPfx $settings.CertPath
+            $graphCert = $pfx.Cert
+            $resolvedGraphCertPassword = $pfx.Password
+            try
+            {
+                $graphLabel = "Graph client certificate $($graphCert.Thumbprint) '$($graphCert.Subject)' in '$graphCertPath'"
+                Assert $graphCert.HasPrivateKey "$graphLabel has no private key. Export it again as a PFX that includes the private key."
+                $warning = GetGraphCertWarnings -Cert $graphCert
+                if ($warning) { Write-Warning "${graphLabel}: $warning." }
+            }
+            finally
+            {
+                $graphCert.Reset()
+            }
+        }
+        #Every match, for the same reason as CertMatches.
+        $Settings | Add-Member -NotePropertyName GraphCertMatches -NotePropertyValue $graphCertMatches -Force
+        #Written to AzureAd:ClientCredentials by the AppConfig step. Never printed.
+        $Settings | Add-Member -NotePropertyName ResolvedGraphCertPassword -NotePropertyValue $resolvedGraphCertPassword -Force
+
+        #ClientCredentials wins over the other two ways of giving Microsoft.Identity.Web a
+        #credential, so once Deploy.ps1 writes it they are dead weight - and a client secret
+        #left in the site folder is still a secret. Said, not removed: the admin put them there.
+        $hasAzureAd = $appSettings -and $appSettings.PSObject.Properties['AzureAd']
+        if (($hasGraphCertSubject -or $hasGraphCertPath) -and $hasAzureAd)
+        {
+            foreach ($key in 'ClientSecret', 'ClientCertificates')
+            {
+                #An empty value (a template's placeholder) is no credential, so not worth a word.
+                if (@($appSettings.AzureAd.$key | Where-Object { $_ }).Count -gt 0)
+                {
+                    Write-Warning "appsettings.Production.json has AzureAd.$key, which is ignored once Deploy.ps1 writes AzureAd.ClientCredentials for GraphCert$(if ($hasGraphCertSubject) { 'Subject' } else { 'Path' }). Remove it from $appSettingsPath$(if ($key -eq 'ClientSecret') { ', and delete the secret from the app registration' })."
+                }
+            }
+        }
+
         #Folder access: the Server section only adds what the service account lacks, so
         #folders left open to every user (the default under C:\) are reported here rather
-        #than changed. Reading SitePath only matters once a secret is stored there.
-        $siteHasSecret = -not [string]::IsNullOrEmpty($resolvedCertPassword)
-        if ($appSettings -and $appSettings.PSObject.Properties['AzureAd'])
+        #than changed. Reading SitePath only matters once a secret is stored there: a PFX
+        #password (HTTPS or Graph), a client secret, or a whole PFX in Base64.
+        $siteHasSecret = -not ([string]::IsNullOrEmpty($resolvedCertPassword) -and [string]::IsNullOrEmpty($resolvedGraphCertPassword))
+        if ($hasAzureAd)
         {
-            $siteHasSecret = $siteHasSecret -or -not [string]::IsNullOrEmpty([string]$appSettings.AzureAd.ClientSecret)
+            $siteHasSecret = $siteHasSecret -or -not [string]::IsNullOrEmpty([string]$appSettings.AzureAd.ClientSecret) -or
+            [bool](@($appSettings.AzureAd.ClientCredentials) | Where-Object { $_ -and ($_.CertificatePassword -or $_.Base64EncodedValue -or $_.ClientSecret) })
         }
         $folderChecks = @(
             @{ Label = 'SitePath'; Path = $settings.SitePath; WarnOnRead = $siteHasSecret }

@@ -56,6 +56,8 @@ With `CertSubject`, a renewed certificate with the same subject takes over on th
 
 Certificates whose keys live in a TPM, HSM, or smart card have no file to permission this way. `Deploy.ps1` warns and moves on; grant access with that provider's own tooling.
 
+The [Entra](entra.md) **Graph client certificate** gets the same treatment when the settings file names it. With `GraphCertSubject`, `Deploy.ps1` grants Read on the private key of every certificate with that exact subject. With `GraphCertPath`, it grants Read on the PFX's folder, which can be the same folder as `CertPath`. See [Certificate Renewal](Certificate-Renewal.md#graph-client-certificate).
+
 ## CPU / RAM
 
 There are no firm requirements beyond the Microsoft recommendations for your Windows Server version — usage drives requirements. Expect roughly the cost of spinning up a PowerShell 7 runspace per execution plus typical ASP.NET Core consumption. WebJEA has been demonstrated to work on 1 CPU and 1 GB of RAM and runs reliably on 2 CPU with 4 GB of RAM; what your scripts do will dominate.
@@ -79,7 +81,7 @@ The service account needs this access to the folders in the settings file:
 Because `Deploy.ps1` leaves your permissions alone, it **warns** when one of these folders is open to everyone on the server instead:
 
 * **Write access for a broad group** (Everyone, Authenticated Users, Users, Interactive, Guests, Domain Users) on any of the three. Anyone who can sign in to the server could then change what WebJEA runs: drop a DLL next to `WebJEA.exe`, or edit a script that runs as the service account. Folders created under `C:\` get this by default: Windows Server lets Users create files in subfolders, and Windows 10/11 gives Authenticated Users Modify.
-* **Read access for a broad group** on `SitePath`, once `appsettings.Production.json` holds a secret (`AzureAd:ClientSecret`, or the password of a `CertPath` PFX).
+* **Read access for a broad group** on `SitePath`, once `appsettings.Production.json` holds a secret (`AzureAd:ClientSecret`, the password of a `CertPath` or `GraphCertPath` PFX, or a whole PFX in a `ClientCredentials` entry).
 
 To restrict a folder, turn off inheritance and grant only SYSTEM, Administrators and the service account. The well-known SIDs make this work on non-English Windows too:
 

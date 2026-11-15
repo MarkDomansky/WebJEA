@@ -413,7 +413,66 @@ Task PrepareCertificate -Depends GetCredential, StageDeployment -PreCondition { 
     }
 }
 
-Task RunDeployScript -Depends GetCredential, StageDeployment, PrepareCertificate -PreCondition { -not $script:doNotRunDeploy } {
+Task PrepareGraphCertificate -Depends GetCredential, StageDeployment -PreCondition { -not $script:doNotRunDeploy } {
+    # The Entra Graph client certificate, in whichever mode Deployment.GraphCertMode asks for:
+    #   None (default) - nothing; the settings file has no GraphCertSubject/GraphCertPath.
+    #   Store          - one in LocalMachine\My with the settings file's exact GraphCertSubject.
+    #   File           - a PFX at GraphCertPath with a random password, passed as
+    #                    -GraphCertPassword, in a folder locked down like CertPath's.
+    # Both reuse a store certificate with the subject when there is one: Graph calls only
+    # succeed for a certificate whose public key is uploaded to the app registration, so
+    # keep one in the VM's baseline snapshot. A new one is reported so it can be uploaded.
+    $mode = if ($script:config.Deployment.GraphCertMode) { $script:config.Deployment.GraphCertMode } else { 'None' }
+    Assert ($mode -in 'Store', 'File', 'None') "Deployment.GraphCertMode must be Store, File or None, not '$mode'."
+    $script:testGraphCertPassword = $null
+    if ($mode -eq 'None')
+    {
+        Write-Log 'GraphCertMode None: not creating a Graph client certificate'
+        return
+    }
+
+    $session = New-PSSession -VMName $script:webVMName -Credential $script:credential -ErrorAction Stop
+    try
+    {
+        $prepared = Invoke-Command -Session $session -ScriptBlock {
+            param($SettingsPath, $Mode)
+            $ErrorActionPreference = 'Stop'
+            # Same parse as Deploy.ps1: //-comment lines dropped, joined into one document.
+            $settings = (Get-Content -Path $SettingsPath | Where-Object { $_ -notmatch '^\s*//' }) -join "`n" | ConvertFrom-Json
+            $subject = if ($settings.GraphCertSubject) { $settings.GraphCertSubject } else { 'CN=WebJEA-Graph' }
+            if ($Mode -eq 'Store' -and -not $settings.GraphCertSubject) { throw 'Deployment.GraphCertMode is Store, but the settings file has no GraphCertSubject.' }
+            if ($Mode -eq 'File' -and -not $settings.GraphCertPath) { throw 'Deployment.GraphCertMode is File, but the settings file has no GraphCertPath.' }
+
+            $cert = Get-ChildItem Cert:\LocalMachine\My | Where-Object { $_.HasPrivateKey -and $_.Subject -eq $subject } |
+                Sort-Object NotBefore -Descending | Select-Object -First 1
+            $note = if ($cert) { "existing certificate $($cert.Thumbprint)" }
+            else
+            {
+                $cert = New-SelfSignedCertificate -Subject $subject -CertStoreLocation Cert:\LocalMachine\My -KeySpec Signature `
+                    -KeyAlgorithm RSA -KeyLength 2048 -NotAfter (Get-Date).AddYears(2)
+                "NEW certificate $($cert.Thumbprint) - upload its public key to the app registration for Graph calls to succeed"
+            }
+            if ($Mode -eq 'Store') { return @{ Message = "$note in LocalMachine\My ('$subject')" } }
+
+            $folder = Split-Path -Path $settings.GraphCertPath -Parent
+            if (-not (Test-Path $folder)) { New-Item -ItemType Directory -Path $folder | Out-Null }
+            & icacls.exe $folder /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)(F)' '*S-1-5-32-544:(OI)(CI)(F)' | Out-Null
+            $plain = [Guid]::NewGuid().ToString('N')
+            $password = ConvertTo-SecureString $plain -AsPlainText -Force
+            Export-PfxCertificate -Cert $cert -FilePath $settings.GraphCertPath -Password $password | Out-Null
+            return @{ Message = "$note exported to $($settings.GraphCertPath)"; Password = $password }
+        } -ArgumentList $script:stagedSettingsPath, $mode
+
+        $script:testGraphCertPassword = $prepared.Password
+        Write-Log "Graph client certificate ($mode): $($prepared.Message)" -Level Success
+    }
+    finally
+    {
+        Remove-PSSession -Session $session -ErrorAction SilentlyContinue
+    }
+}
+
+Task RunDeployScript -Depends GetCredential, StageDeployment, PrepareCertificate, PrepareGraphCertificate -PreCondition { -not $script:doNotRunDeploy } {
     # A regular (non-gMSA) service account's password comes from SecretManagement, like
     # the VM credential - never from the settings file, which Deploy.ps1 rejects.
     $servicePassword = $null
@@ -433,10 +492,10 @@ Task RunDeployScript -Depends GetCredential, StageDeployment, PrepareCertificate
         Write-Log "  Deploy root:   $script:stagedDeployRoot"
         Write-Log "  Settings file: $script:stagedSettingsPath"
         Write-Log "  Edition:       $script:deployEdition"
-        Write-Log "  Passwords:     -CertPassword $(if ($script:testCertPassword) { 'yes' } else { 'no' }), -ServicePassword $(if ($servicePassword) { 'yes' } else { 'no' })"
+        Write-Log "  Passwords:     -CertPassword $(if ($script:testCertPassword) { 'yes' } else { 'no' }), -GraphCertPassword $(if ($script:testGraphCertPassword) { 'yes' } else { 'no' }), -ServicePassword $(if ($servicePassword) { 'yes' } else { 'no' })"
 
         $result = Invoke-Command -Session $session -ScriptBlock {
-            param($DeployRoot, $SettingsPath, $Edition, $CertPassword, $ServicePassword)
+            param($DeployRoot, $SettingsPath, $Edition, $CertPassword, $ServicePassword, $GraphCertPassword)
             $ErrorActionPreference = 'Stop'
 
             $deployScript = Get-ChildItem -Path $DeployRoot -Filter 'Deploy.ps1' -File | Select-Object -First 1
@@ -448,6 +507,7 @@ Task RunDeployScript -Depends GetCredential, StageDeployment, PrepareCertificate
             $deployArgs = @{ SettingsFile = $SettingsPath; Verbose = $true }
             if ($CertPassword) { $deployArgs.CertPassword = $CertPassword }
             if ($ServicePassword) { $deployArgs.ServicePassword = $ServicePassword }
+            if ($GraphCertPassword) { $deployArgs.GraphCertPassword = $GraphCertPassword }
 
             if ($Edition -eq 'PowerShell7')
             {
@@ -473,13 +533,18 @@ Task RunDeployScript -Depends GetCredential, StageDeployment, PrepareCertificate
                     $env:WEBJEA_TEST_SERVICEPASSWORD = [Net.NetworkCredential]::new('', $ServicePassword).Password
                     $command += ' -ServicePassword (ConvertTo-SecureString $env:WEBJEA_TEST_SERVICEPASSWORD -AsPlainText -Force)'
                 }
+                if ($GraphCertPassword)
+                {
+                    $env:WEBJEA_TEST_GRAPHCERTPASSWORD = [Net.NetworkCredential]::new('', $GraphCertPassword).Password
+                    $command += ' -GraphCertPassword (ConvertTo-SecureString $env:WEBJEA_TEST_GRAPHCERTPASSWORD -AsPlainText -Force)'
+                }
                 try
                 {
                     $deployResult = & $pwsh.Source -NoProfile -ExecutionPolicy Bypass -Command $command 2>&1
                 }
                 finally
                 {
-                    Remove-Item -Path env:WEBJEA_TEST_CERTPASSWORD, env:WEBJEA_TEST_SERVICEPASSWORD -ErrorAction SilentlyContinue
+                    Remove-Item -Path env:WEBJEA_TEST_CERTPASSWORD, env:WEBJEA_TEST_SERVICEPASSWORD, env:WEBJEA_TEST_GRAPHCERTPASSWORD -ErrorAction SilentlyContinue
                 }
                 # A child process reports failure through its exit code, not a thrown error.
                 if ($LASTEXITCODE -ne 0)
@@ -501,7 +566,7 @@ Task RunDeployScript -Depends GetCredential, StageDeployment, PrepareCertificate
                 Engine       = $engine
                 Output       = $deployResult | Out-String
             }
-        } -ArgumentList $script:stagedDeployRoot, $script:stagedSettingsPath, $script:deployEdition, $script:testCertPassword, $servicePassword
+        } -ArgumentList $script:stagedDeployRoot, $script:stagedSettingsPath, $script:deployEdition, $script:testCertPassword, $servicePassword, $script:testGraphCertPassword
 
         write-host ($result | convertto-json -depth 5)
         Assert $result.Success "Deployment failed: $($result.Output)"

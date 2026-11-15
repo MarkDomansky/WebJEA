@@ -1,5 +1,5 @@
 {
-    "_comment": "Deploy.ps1 settings. Copy to settings.json and update values. Passwords are never stored here: pass -ServicePassword / -CertPassword to Deploy.ps1. Full reference: docs/Installation.md#settings-reference",
+    "_comment": "Deploy.ps1 settings. Copy to settings.json and update values. Passwords are never stored here: pass -ServicePassword / -CertPassword / -GraphCertPassword to Deploy.ps1. Full reference: docs/Installation.md#settings-reference",
     "_comment1": "Windows service name to create. Default WebJEA.",
     "ServiceName": "WebJEA",
     "_comment2": "Every host name the site answers on; the certificate must cover all of them.",
@@ -14,6 +14,10 @@
     "CertSubject": "site.example.com",
     "_comment7a": "Certificate in a PFX file: full path, in a folder of its own (e.g. C:\\webjea\\tls\\webjea.pfx). Kestrel reloads it when it changes, so ACME renewals need no restart. Pass a password-protected PFX's password with -CertPassword. See docs/Certificate-Renewal.md.",
     "CertPath": "",
+    "_comment7b": "Entra mode only, optional: the Graph client certificate in the machine store - its exact subject, e.g. CN=WebJEA-Graph. Deploy.ps1 writes AzureAd:ClientCredentials and grants the service account read on its private key. Leave this and GraphCertPath empty to configure AzureAd yourself. See docs/entra-appreg.md#option-a-certificate-recommended.",
+    "GraphCertSubject": "",
+    "_comment7c": "Entra mode only, optional: the Graph client certificate as a PFX file instead (full path, e.g. C:\\webjea\\tls\\webjea-graph.pfx). Read at service start. Pass a password-protected PFX's password with -GraphCertPassword. Set GraphCertSubject or GraphCertPath, not both.",
+    "GraphCertPath": "",
     "_comment8": "Folder the release's site files are copied to.",
     "SitePath": "C:\\webjea\\site",
     "_comment9": "Folder for WebJEA scripts and webjea.json. Starter scripts are copied only if it has no webjea.json (or legacy config.json), and never overwrite existing files.",

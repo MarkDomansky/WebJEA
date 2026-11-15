@@ -99,7 +99,12 @@ Useful for a handful of users without creating a group.
 
 ## Configure WebJEA
 
-Put the values from the [app registration](entra-appreg.md#what-youll-collect) in `appsettings.Production.json` in the site folder. With a **certificate** ([Option A](entra-appreg.md#option-a-certificate-recommended), recommended):
+Put the values from the [app registration](entra-appreg.md#what-youll-collect) in `appsettings.Production.json` in the site folder.
+
+> [!TIP]
+> On a Windows service install, set `GraphCertSubject` (or `GraphCertPath`) in the `Deploy.ps1` settings file instead of writing `ClientCredentials` by hand. `Deploy.ps1` then writes `ClientCredentials` and grants the service account access to the certificate ([settings reference](Installation.md#settings-reference)). You still add `Authentication`, `Instance`, `TenantId` and `ClientId` below.
+
+With a **certificate** ([Option A](entra-appreg.md#option-a-certificate-recommended), recommended):
 
 ```json
 {
@@ -199,7 +204,7 @@ Entra errors are written to the WebJEA log. Most authorization problems show up 
 | `Entra: signed out <user> before execute: sign-in no longer valid (<code>)` | The user was disabled, their sessions were revoked, or their password was reset. `user_null` means WebJEA restarted and has no cached token for the user. | None needed. The user reloads and signs in again, or is blocked by Entra. |
 | `Entra: couldn't revalidate <user> (<reason>); execute refused.` | Graph couldn't be reached, is throttling (`Graph HTTP 429`), or denied access (`AADSTS65001`: missing admin consent). | Check outbound access to `graph.microsoft.com` and admin consent ([Step 5](entra-appreg.md#step-5-grant-microsoft-graph-permission)). To run scripts anyway during an outage, set `RevalidateFailOpen: true`. |
 | `IDW10109: All client certificates passed to the configuration have expired or can't be loaded` | No valid certificate matched: wrong `CertificateDistinguishedName`/thumbprint or store, the certificate expired, or the PFX path or password is wrong. The full message lists the reason for each certificate. | Check the subject matches exactly (`CN=WebJEA-Graph`) and the certificate is in `LocalMachine\My` and not expired. In Docker, check the mount and `CertificatePassword`. |
-| `Keyset does not exist` / `CryptographicException` while loading the certificate | The service account can't read the certificate's private key. Common after a renewal, because the new key file has default permissions. | Grant the service account **Read** on the private key ([Step 4, Option A](entra-appreg.md#option-a-certificate-recommended), step 3). In Docker, make the PFX readable by the container's `app` user. |
+| `Keyset does not exist` / `CryptographicException` while loading the certificate | The service account can't read the certificate's private key. Common after a renewal, because the new key file has default permissions. | Re-run `Deploy.ps1` with `GraphCertSubject` set, which grants it, or grant the service account **Read** on the private key by hand ([Step 4, Option A](entra-appreg.md#option-a-certificate-recommended), step 3). In Docker, make the PFX readable by the container's `app` user. |
 | `AADSTS700027: The certificate with identifier used to sign the client assertion is not registered on application` | The certificate WebJEA loaded isn't uploaded to the app registration, e.g. a renewed certificate whose `.cer` wasn't uploaded. | Upload the `.cer` under **Certificates & secrets** → **Certificates** ([Step 4, Option A](entra-appreg.md#option-a-certificate-recommended)). |
 | `EntraUserContext: group overage detected ... EnableGraph is false` | Graph is turned off, so the token can carry only a limited number of groups. A user in more than ~200 groups gets no `groups` claim. With Graph off, sign-in can also fall back to the implicit flow, where Entra sends a `hasgroups` marker instead of the groups once a user is in more than **5** groups. | Set `EnableGraph: true` (the default) and complete [App registration Steps 4–5](entra-appreg.md#step-4-add-a-client-credential) (client credential and Graph permission), then have affected users sign out and back in. |
 | `EntraGroupResolver: '<entry>' is not a GUID; matching it as an app role value or UPN.` (Trace) | Informational. If `<entry>` was meant to be a group, it didn't resolve. | Use the group's object ID. Windows-style entries never match; see [Switching from Windows mode](#switching-from-windows-mode). |

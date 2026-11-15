@@ -98,7 +98,19 @@ A self-signed certificate is fine. Entra only checks that the public key matches
 
 2. **Upload the public key.** In the app registration, go to **Certificates & secrets** → **Certificates** → **Upload certificate**, select `WebJEA-Graph.cer`, and click **Add**. The `.cer` holds only the public key, so it's safe to copy around.
 
-3. **Let the service account read the private key** (Windows service only). Windows grants only SYSTEM and Administrators access to a machine certificate's private key.
+3. **Tell `Deploy.ps1` about it** (Windows service). Put the subject in your settings file and re-run `Deploy.ps1`:
+
+   ```json
+   "GraphCertSubject": "CN=WebJEA-Graph",
+   ```
+
+   `Deploy.ps1` writes `AzureAd:ClientCredentials` for you and grants the service account **Read** on the certificate's private key. Windows otherwise grants that only to SYSTEM and Administrators, and Graph calls fail with `Keyset does not exist` ([Troubleshooting](entra.md#troubleshooting)). It repeats the grant on every deploy, so a renewed certificate, which has a new key file, is covered by re-running it.
+
+   To keep the certificate in a PFX file instead of the machine store, set `"GraphCertPath": "C:\\webjea\\tls\\webjea-graph.pfx"` and pass its password with `-GraphCertPassword`. `Deploy.ps1` then grants read access to the file's folder instead ([settings reference](Installation.md#settings-reference)).
+
+   <details>
+   <summary>Granting the key permission by hand (without <code>Deploy.ps1</code>)</summary>
+
    - **GUI:** run `certlm.msc` → **Personal** → **Certificates** → right-click **WebJEA-Graph** → **All Tasks** → **Manage Private Keys** → **Add** the WebJEA service account (for a gMSA, include the trailing `$` and select **Service Accounts** under **Object Types**) → allow **Read** only.
    - **PowerShell**, for a certificate created with the command above:
 
@@ -113,12 +125,13 @@ A self-signed certificate is fine. Entra only checks that the public key matches
      Set-Acl $file $acl
      ```
 
-   > [!IMPORTANT]
-   > `Deploy.ps1` grants this permission only for the **HTTPS** certificate (`CertSubject` or `CertPath`). It doesn't know about the Graph certificate, so you have to grant it yourself, including after every renewal, because a renewed certificate has a new key file. Without it, Graph calls fail with `Keyset does not exist` ([Troubleshooting](entra.md#troubleshooting)).
+   Repeat it after every renewal, because a renewed certificate has a new key file. Then add `AzureAd:ClientCredentials` yourself ([Configure WebJEA](entra.md#configure-webjea)).
 
-4. **Record the subject** (`CN=WebJEA-Graph`). It becomes `AzureAd:ClientCredentials` (see [Configure WebJEA](entra.md#configure-webjea)). For Docker, keep `graph.pfx` and its password out of version control.
+   </details>
 
-**Renewal:** before the certificate expires, create a new one with the **same subject**, upload its `.cer`, and grant key access again. WebJEA uses the newest valid certificate with a matching subject, so the configuration doesn't change; restart WebJEA to switch to the new certificate. For Docker, replace `graph.pfx` and restart the container. Delete the old certificate from the app registration once it has expired.
+4. **Record the subject** (`CN=WebJEA-Graph`). For Docker, it's the PFX you'll mount ([Configure WebJEA](entra.md#configure-webjea)); keep `graph.pfx` and its password out of version control.
+
+**Renewal:** before the certificate expires, create a new one with the **same subject**, upload its `.cer`, and re-run `Deploy.ps1` to grant key access to it. WebJEA uses the newest valid certificate with a matching subject, so the configuration doesn't change; restart WebJEA to switch to the new certificate. For a `GraphCertPath` PFX or Docker, replace the PFX and restart the service or container. Delete the old certificate from the app registration once it has expired. See [Certificate Renewal](Certificate-Renewal.md#graph-client-certificate).
 
 ### Option B: Client secret
 
