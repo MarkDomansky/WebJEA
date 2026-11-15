@@ -145,8 +145,9 @@ function Step_DnsAndCert([bool]$Core)
     $body = @(
         'Pick the FQDN the site will answer on (settings.json SiteFQDNs), make it resolve'
         'to the server from your test client, and stage a certificate for HTTPS.'
-        'Deploy.ps1 validates that the certificate in LocalMachine\My actually covers'
-        'the FQDN, so create the cert before running it.'
+        'Deploy.ps1 checks the certificate before running, so create it first. Either'
+        'leave it in LocalMachine\My (settings.json CertSubject), or export it to a PFX'
+        'file (settings.json CertPath) - the mode for ACME certificates.'
     )
     if ($Core)
     {
@@ -165,11 +166,19 @@ function Step_DnsAndCert([bool]$Core)
             '# Self-signed certificate for testing (on the TARGET server, elevated):'
             "`$cert = New-SelfSignedCertificate -DnsName 'webjea-test.corp.example.com' -CertStoreLocation Cert:\LocalMachine\My"
             '$cert.Subject    # CN=webjea-test.corp.example.com -> settings.json CertSubject'
+            ''
+            '# Optional - PFX file mode instead (settings.json CertPath; empty CertSubject):'
+            'New-Item -ItemType Directory C:\webjea\tls'
+            "icacls C:\webjea\tls /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)(F)' '*S-1-5-32-544:(OI)(CI)(F)'"
+            "`$pfxPassword = Read-Host -AsSecureString 'PFX password'"
+            'Export-PfxCertificate -Cert $cert -FilePath C:\webjea\tls\webjea.pfx -Password $pfxPassword'
+            'Remove-Item "Cert:\LocalMachine\My\$($cert.Thumbprint)" -DeleteKey    # the PFX is now the only copy'
         )
-        Note   = 'A self-signed certificate is not trusted by the server, so set AllowUntrustedCert to true in settings.json - Deploy.ps1 otherwise stops with an UntrustedRoot error. Browsers will warn on it too - expected in a lab. HTTP-only test: set HttpsPort to 0 and skip the certificate - HTTP is only redirected to HTTPS when there is an HTTPS listener, so leaving HttpsPort at 0 is enough. Deploy.ps1 will refuse an HTTP-only install unless you pass -AllowHttpWithoutRedirect.'
+        Note   = 'A self-signed certificate is not trusted by the server: Deploy.ps1 warns (UntrustedRoot) and carries on. Browsers will warn on it too - expected in a lab. HTTP-only test: set HttpsPort to 0 and skip the certificate - HTTP is only redirected to HTTPS when there is an HTTPS listener, so leaving HttpsPort at 0 is enough. Deploy.ps1 will refuse an HTTP-only install unless you pass -AllowHttpWithoutRedirect.'
         Verify = @(
             'From the test client: ping/nslookup of the FQDN reaches the server'
-            'The certificate exists in LocalMachine\My with the FQDN as its subject'
+            'Store mode: the certificate exists in LocalMachine\My with the FQDN as its subject'
+            'File mode: C:\webjea\tls\webjea.pfx exists, and icacls shows only SYSTEM and Administrators on the folder'
         )
     }
 }
@@ -195,10 +204,10 @@ function Step_ServiceAccount
             '# Option B - local lab account (workgroup server):'
             "net user webjeasvc 'P@ssw0rd!123' /add"
         )
-        Note   = "settings.json: gMSA -> ServiceUserName 'DOMAIN\webjea-svc$' with ServicePassword ''; user account -> 'DOMAIN\user' or '<COMPUTERNAME>\webjeasvc' plus the password. Deploy.ps1 enforces exactly these combinations."
+        Note   = "settings.json: gMSA -> ServiceUserName 'DOMAIN\webjea-svc$'; user account -> 'DOMAIN\user' or '<COMPUTERNAME>\webjeasvc', with its password passed to Deploy.ps1 as -ServicePassword (never in settings.json - Deploy.ps1 rejects a ServicePassword there)."
         Verify = @(
             'gMSA: Test-ADServiceAccount returns True on the target server'
-            'ServiceUserName/ServicePassword values decided and recorded'
+            'ServiceUserName decided and recorded (and the password, if not a gMSA)'
         )
     }
 }
@@ -210,12 +219,13 @@ function Step_CopyAndSettings([int]$HttpPort, [int]$HttpsPort, [string]$PortNote
         'template and fill in your values:'
         ''
         '  SiteFQDNs           = the FQDN from the DNS/cert step, as a one-element array'
-        '  ServiceUserName     = account from the previous step (ServicePassword if not gMSA)'
+        '  ServiceUserName     = account from the previous step (no password here)'
         "  HttpPort            = $HttpPort"
         "  HttpsPort           = $HttpsPort"
         '  CertSubject         = the FQDN from the cert step (when HttpsPort > 0;'
         '                        HTTP is then redirected to HTTPS automatically)'
-        '  AllowUntrustedCert  = true                (self-signed lab certificate)'
+        '  CertPath            = C:\webjea\tls\webjea.pfx instead, for PFX file mode'
+        '                        (set exactly one of CertSubject / CertPath)'
         '  SitePath            = C:\inetpub\webjea   (app binaries; default is fine)'
         '  ScriptsPath         = C:\webjea           (webjea.json + your .ps1 scripts)'
         '  LogPath             = C:\webjea           (webjea.log / webjea-usage.log)'
@@ -277,6 +287,10 @@ function Step_RealDeploy([string[]]$ExtraNotes)
         Body   = $body
         Code   = @(
             'powershell.exe -File .\Deploy.ps1 -SettingsFile .\settings.json'
+            ''
+            '# Regular (non-gMSA) account and/or password-protected PFX: passwords are'
+            '# SecureString parameters, so run from the elevated session itself, not -File:'
+            ".\Deploy.ps1 -SettingsFile .\settings.json -ServicePassword (Read-Host -AsSecureString 'Service password') -CertPassword `$pfxPassword"
             ''
             '# If SPN registration fails (no AD write access) or setspn.exe is missing'
             '# and you accept NTLM-only authentication:'
