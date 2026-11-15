@@ -119,3 +119,18 @@ Restart-Service WebJEA
 ```
 
 Do this **before** the service next restarts for any other reason: Kestrel switches to the renewal at that restart, and HTTPS fails to start if the service account can't read its key. `certlm.msc` → the certificate → **All Tasks** → **Manage Private Keys** does the same by hand. Re-running `.\Deploy.ps1 -SettingsFile .\settings.json -OnlySections Service` also grants it, for every certificate that matches `CertSubject`.
+
+## Graph client certificate
+
+In [Entra mode](entra.md), WebJEA uses a second certificate to call Microsoft Graph. It's usually self-signed, because Entra trusts the public key you uploaded to the app registration, not a CA. So it can last a year or two, and ACME doesn't apply: every renewal also needs a new upload. `Deploy.ps1` manages it when the settings file has `GraphCertSubject` or `GraphCertPath` ([settings reference](Installation.md#settings-reference)).
+
+Either way, WebJEA loads the certificate when the service starts, so a renewal takes effect at the next restart. To renew:
+
+1. Create the new certificate with the **same subject** ([App registration, Option A](entra-appreg.md#option-a-certificate-recommended)) and upload its `.cer` to the app registration. Keep the old one there until WebJEA has switched.
+2. Put it where WebJEA reads it from:
+   * **`GraphCertSubject`:** import it into `LocalMachine\My` with its private key, then re-run `.\Deploy.ps1 -SettingsFile .\settings.json -OnlySections Service` to grant the service account read on the new key. WebJEA uses the currently valid certificate with that exact subject that was issued last.
+   * **`GraphCertPath`:** replace the PFX file, in a folder that follows [the same rules as `CertPath`](#where-to-put-the-pfx). `C:\webjea\tls` can hold both. If the password changed, re-run `Deploy.ps1` with `-GraphCertPassword`.
+3. Restart the service, and check the log for `Entra: Graph client credential = certificate (...)`.
+4. Delete the old certificate from the app registration.
+
+`Deploy.ps1` warns when the Graph certificate expires within 30 days or isn't valid yet. Sign-in keeps working without it, but [group overage](entra.md#group-overage-users-in-more-than-200-groups), group display names and [revalidation](entra.md#near-real-time-revocation) don't.

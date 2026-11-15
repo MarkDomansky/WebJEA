@@ -41,6 +41,8 @@
         "LocalSettingsPath": ".\\settings.json",
         "_comment3": "Self-signed test certificate made on the VM before Deploy.ps1 runs. Store: in LocalMachine\\My for the settings file's CertSubject (unless one exists). File: a fresh PFX at its CertPath with a random password, passed as -CertPassword. None: provide your own.",
         "CertMode": "Store",
+        "_comment3a": "Entra Graph client certificate. None: the settings file has no GraphCertSubject/GraphCertPath. Store: one in LocalMachine\\My with the settings file's exact GraphCertSubject. File: a PFX at its GraphCertPath with a random password, passed as -GraphCertPassword. Both reuse a store certificate with that subject (default CN=WebJEA-Graph) when there is one - keep it in the VM snapshot with its public key uploaded to the app registration, or Graph calls fail.",
+        "GraphCertMode": "None",
         "_comment4": "Only for a regular (non-gMSA) ServiceUserName: SecretManagement secret holding its password, passed as -ServicePassword. Leave empty for a gMSA.",
         "ServicePasswordSecretName": ""
     },

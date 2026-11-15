@@ -26,6 +26,7 @@ For Docker, or migrating an existing IIS install, see the [deployment guide](dep
 
    * `-ServicePassword` — the password of a regular (non-gMSA) `ServiceUserName`. Needed on the first deploy and when the account or its password changes; later deploys keep the stored credential.
    * `-CertPassword` — the password of a password-protected PFX at `CertPath`. Later deploys reuse the stored one.
+   * `-GraphCertPassword` — the same, for the Graph client certificate PFX at `GraphCertPath` (Entra mode).
 
    ```powershell
    .\Deploy.ps1 -SettingsFile .\settings.json -ServicePassword (Read-Host -AsSecureString 'Service account password')
@@ -33,7 +34,7 @@ For Docker, or migrating an existing IIS install, see the [deployment guide](dep
 
 6. Browse to `https://<one of your SiteFQDNs>/`. By default, machine local administrators have access to the starter page, which executes a demo script exercising the major features of WebJEA so you can verify everything works.
 
-`Deploy.ps1` copies the site files, creates and starts the Windows service, writes the production configuration, grants the service account the [folder access](System-Requirements.md#folder-permissions) it needs and read access to the certificate (its private key, or the PFX's folder), opens firewall ports, verifies Kerberos SPNs, and smoke-tests every configured binding — the [deployment guide](deployment-migration.md) describes each step in detail. It warns, without changing anything, when the site, scripts or log folder is open to every user on the server.
+`Deploy.ps1` copies the site files, creates and starts the Windows service, writes the production configuration, grants the service account the [folder access](System-Requirements.md#folder-permissions) it needs and read access to the HTTPS certificate and, if configured, the Entra Graph client certificate (the private key, or the PFX's folder), opens firewall ports, verifies Kerberos SPNs, and smoke-tests every configured binding — the [deployment guide](deployment-migration.md) describes each step in detail. It warns, without changing anything, when the site, scripts or log folder is open to every user on the server.
 
 While not strictly required, running Windows updates after deployment is always a good idea.
 
@@ -50,11 +51,15 @@ The settings file is consumed by the installer (`Deploy.ps1`). It uses JSON synt
 | `HttpPort` / `HttpsPort` | Ports. Set a port number to listen, or `0`/omit to disable that listener. At least one must be enabled. `HttpsPort` requires `CertSubject` or `CertPath`. When both are set, HTTP is automatically and permanently redirected to HTTPS — there is no separate setting for this. Kestrel binds these ports exclusively, unlike IIS's shared `http.sys` binding — nothing else on the server, including IIS, can also be listening on the same port. |
 | `CertSubject` | **Machine-store certificate.** Text contained in the subject of the HTTPS certificate in `LocalMachine\My` — usually the host name in its CN (`webjea.example.com` for `CN=webjea.example.com`). It is matched as a case-insensitive substring of the subject, not the SANs, and when several certificates match, Kestrel serves the one that expires last — so a renewed certificate is picked up on the next service restart with no settings change. `Deploy.ps1` grants `ServiceUserName` read access to the private key of every matching certificate ([details](System-Requirements.md#private-key-permissions)); a later renewal needs that grant again ([Certificate Renewal](Certificate-Renewal.md#store-mode-certsubject)). Set this or `CertPath`, not both. |
 | `CertPath` | **PFX file certificate.** Full path to a `.pfx` file, in a folder of its own ([where to put it](Certificate-Renewal.md#where-to-put-the-pfx)). Kestrel reloads the file whenever it changes, so an ACME client renewing it in place needs no restart and no permission changes. `Deploy.ps1` grants `ServiceUserName` read access to the file's folder. For a password-protected PFX, pass the password with the `-CertPassword` parameter. Set this or `CertSubject`, not both. |
+| `GraphCertSubject` | **Entra mode, optional: Graph client certificate in the machine store.** The certificate's **exact** subject, e.g. `CN=WebJEA-Graph` — unlike `CertSubject`, part of the name doesn't match. `Deploy.ps1` writes it to `AzureAd:ClientCredentials` (`StoreWithDistinguishedName`, `LocalMachine/My`) and grants `ServiceUserName` read access to the private key of every certificate with that subject. At startup WebJEA uses the currently valid one issued last, so a renewal imported before a deploy works after the next restart ([Certificate Renewal](Certificate-Renewal.md#graph-client-certificate)). Set this or `GraphCertPath`, not both; leave both empty to [configure `AzureAd` yourself](entra.md#configure-webjea). |
+| `GraphCertPath` | **Entra mode, optional: Graph client certificate in a PFX file.** Full path to the `.pfx`, e.g. `C:\webjea\tls\webjea-graph.pfx` — it can share `CertPath`'s folder. `Deploy.ps1` writes it to `AzureAd:ClientCredentials` (`Path`) and grants `ServiceUserName` read access to the file's folder. The file is read when the service starts, so restart it after replacing the file. For a password-protected PFX, pass the password with the `-GraphCertPassword` parameter. |
 | `ScriptsPath` | Where the WebJEA scripts (and `webjea.json`) will be placed. If the folder already has any files, the starter-script copy is skipped to avoid overwriting customizations. |
 | `LogPath` / `LogFile` | Folder and file name for the application log. |
 | `LogUsageFile` | Simplified usage log, importable into Excel or other analysis tools. |
 
 `Deploy.ps1` turns the port and certificate settings into Kestrel's native endpoint configuration — `Kestrel:Endpoints` in the site's `appsettings.Production.json`, with the certificate as `Subject`/`Store` (always `AllowInvalid: true`) or `Path` (plus `Password` for a protected PFX) — and owns that section: hand edits to `Kestrel:Endpoints` are overwritten on the next deploy. Other `Kestrel` settings (for example `Kestrel:Limits`) are left alone.
+
+Likewise, when `GraphCertSubject` or `GraphCertPath` is set, `Deploy.ps1` owns `AzureAd:ClientCredentials` and replaces it on every deploy. The rest of `AzureAd` (`TenantId`, `ClientId`, …) and `Authentication` are still yours to fill in ([Entra ID](entra.md#configure-webjea)). With neither set, `AzureAd` isn't touched.
 
 ## Creating a gMSA
 
