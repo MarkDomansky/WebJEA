@@ -66,3 +66,44 @@ jobs:
         run: |
           $out = Join-Path $env:RUNNER_TEMP 'build-output'
           & "$env:GITHUB_WORKSPACE\.github\workflows\build.ps1" -OutputPath $out -BuildConfiguration Release | Out-Null
+
+  # The release workflow pushes images only AFTER tagging, so a broken
+  # Dockerfile would leave a release without images. Build both targets for
+  # both architectures here (no push, no telemetry secrets) so it fails on the
+  # PR instead. Branches without docker/ (the VB.NET lines) skip it.
+  docker:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check for a Dockerfile
+        id: check
+        run: |
+          if [ -f docker/Dockerfile ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "::notice::No docker/Dockerfile on this branch - skipping."; fi
+      - if: steps.check.outputs.present == 'true'
+        uses: docker/setup-qemu-action@v3
+      - if: steps.check.outputs.present == 'true'
+        uses: docker/setup-buildx-action@v3
+      - name: Build (minimal)
+        if: steps.check.outputs.present == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: runtime
+          platforms: linux/amd64,linux/arm64
+          push: false
+          cache-from: type=gha,scope=docker-test
+          cache-to: type=gha,scope=docker-test,mode=max
+      - name: Build (pwsh)
+        if: steps.check.outputs.present == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: pwsh
+          platforms: linux/amd64,linux/arm64
+          push: false
+          cache-from: type=gha,scope=docker-test
