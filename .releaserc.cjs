@@ -95,8 +95,12 @@ module.exports = {
       {
         assets: [{ path: 'dist/webjea-*.zip' }],
         releaseNameTemplate: 'WebJEA <%= nextRelease.version %>',
+        // The docker job in release.yml pushes this exact tag a few minutes
+        // after the release is created.
         releaseBodyTemplate:
-          '<%= nextRelease.notes %>\n\n[Installation Guide](https://github.com/markdomansky/WebJEA/blob/master/docs/Installation.md)',
+          '<%= nextRelease.notes %>\n\n[Installation Guide](https://github.com/markdomansky/WebJEA/blob/master/docs/Installation.md)' +
+          '\n\n**Docker (Linux, amd64/arm64):** `docker pull ghcr.io/markdomansky/webjea:<%= nextRelease.version %>`' +
+          ' (Docker Hub: `markdomansky/webjea`; [Docker guide](https://github.com/markdomansky/WebJEA/blob/v<%= nextRelease.version %>/docs/docker.md))',
         successComment: false,
         failComment: false,
         labels: false,

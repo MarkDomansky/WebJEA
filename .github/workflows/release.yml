@@ -1,9 +1,12 @@
 name: Release
-# version -> build -> publish. semantic-release decides the next version from
-# the commits on the branch that was pushed; the build job stamps that version
-# into the app and produces webjea-<version>.zip; only then does semantic-release
-# create the tag and the GitHub release with the zip attached. Nothing is tagged
-# and nothing appears on the releases page unless the build is green.
+# version -> build -> publish -> docker. semantic-release decides the next
+# version from the commits on the branch that was pushed; the build job stamps
+# that version into the app and produces webjea-<version>.zip; only then does
+# semantic-release create the tag and the GitHub release with the zip attached.
+# Nothing is tagged and nothing appears on the releases page unless the build is
+# green. Last, the docker job pushes the Linux images for that same version to
+# GHCR and Docker Hub - after the tag, so no image ever exists for a version that
+# was not released. If it fails, "Re-run failed jobs" pushes the same tags.
 #
 # The CHANNEL comes from the branch that was pushed, per .releaserc.cjs:
 #
@@ -173,3 +176,142 @@ jobs:
             exit 1
           fi
           echo "::notice::Published v$ACTUAL"
+
+  # Linux images (amd64 + arm64), minimal and -pwsh, on both registries. GHCR is
+  # the primary registry (docs and examples point there); Docker Hub mirrors it.
+  #
+  #   alpha  2100.0.0-alpha.7  -> 2100.0.0-alpha.7, alpha
+  #   beta   2100.0.0-beta.2   -> 2100.0.0-beta.2, beta
+  #   GA     2100.1.0          -> 2100.1.0, 2100.1, 2100, latest
+  #
+  # The -pwsh variant gets the same tags with a -pwsh suffix (latest-pwsh, ...).
+  # The VB.NET lines (beta-2026, 2026.x) have no docker/ folder and no copy of
+  # this job, so they never publish images.
+  docker:
+    name: Publish Docker Images
+    needs: [version, publish]
+    # Only the public repo owns these image names; a release cut in a fork or
+    # the dev mirror must not overwrite them.
+    if: github.repository == 'markdomansky/WebJEA'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      # Put the description/source annotations on the multi-arch index as well as
+      # on each platform manifest; GHCR and Docker Hub read them from the index.
+      DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # QEMU only runs the trivial RUN steps of the arm64 runtime stages; the
+      # Dockerfile cross-compiles with the native SDK.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # semver patterns other than {{version}} are skipped for prereleases, so
+      # alpha/beta never move 2100, 2100.x or latest.
+      - name: Image tags (minimal)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/markdomansky/webjea
+            docker.io/markdomansky/webjea
+          flavor: |
+            latest=false
+          tags: |
+            type=semver,pattern={{version}},value=${{ env.VERSION }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ env.VERSION }}
+            type=semver,pattern={{major}},value=${{ env.VERSION }}
+            type=raw,value=latest,enable=${{ !contains(env.VERSION, '-') }}
+            type=raw,value=alpha,enable=${{ github.ref_name == 'alpha' }}
+            type=raw,value=beta,enable=${{ github.ref_name == 'beta' }}
+          labels: |
+            org.opencontainers.image.title=WebJEA
+            org.opencontainers.image.description=Self-service web portal for delegated PowerShell scripts (Linux, Entra ID)
+          annotations: |
+            org.opencontainers.image.title=WebJEA
+            org.opencontainers.image.description=Self-service web portal for delegated PowerShell scripts (Linux, Entra ID)
+      - name: Image tags (pwsh)
+        id: meta-pwsh
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/markdomansky/webjea
+            docker.io/markdomansky/webjea
+          flavor: |
+            latest=false
+            suffix=-pwsh,onlatest=true
+          tags: |
+            type=semver,pattern={{version}},value=${{ env.VERSION }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ env.VERSION }}
+            type=semver,pattern={{major}},value=${{ env.VERSION }}
+            type=raw,value=latest,enable=${{ !contains(env.VERSION, '-') }}
+            type=raw,value=alpha,enable=${{ github.ref_name == 'alpha' }}
+            type=raw,value=beta,enable=${{ github.ref_name == 'beta' }}
+          labels: |
+            org.opencontainers.image.title=WebJEA (pwsh)
+            org.opencontainers.image.description=WebJEA plus an interactive pwsh for troubleshooting (Linux, Entra ID)
+          annotations: |
+            org.opencontainers.image.title=WebJEA (pwsh)
+            org.opencontainers.image.description=WebJEA plus an interactive pwsh for troubleshooting (Linux, Entra ID)
+
+      # Telemetry credentials go in as BuildKit secrets, the same values the
+      # build job compiles into the zip (see the Dockerfile's build stage). No
+      # cross-run cache: release images are built from scratch; the pwsh build
+      # reuses the build stage from this job's local buildx cache.
+      - name: Build and push (minimal)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: runtime
+          platforms: linux/amd64,linux/arm64
+          build-args: VERSION=${{ env.VERSION }}
+          secrets: |
+            AWS_KEY=${{ secrets.AWS_KEY }}
+            AWS_KEYSEC=${{ secrets.AWS_KEYSEC }}
+            AWS_QUEUE_URL=${{ secrets.AWS_QUEUE_URL }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+      - name: Build and push (pwsh)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: pwsh
+          platforms: linux/amd64,linux/arm64
+          build-args: VERSION=${{ env.VERSION }}
+          secrets: |
+            AWS_KEY=${{ secrets.AWS_KEY }}
+            AWS_KEYSEC=${{ secrets.AWS_KEYSEC }}
+            AWS_QUEUE_URL=${{ secrets.AWS_QUEUE_URL }}
+          push: true
+          tags: ${{ steps.meta-pwsh.outputs.tags }}
+          labels: ${{ steps.meta-pwsh.outputs.labels }}
+          annotations: ${{ steps.meta-pwsh.outputs.annotations }}
+      - name: Report pushed tags
+        run: |
+          {
+            echo "### Docker images v$VERSION"
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo "${{ steps.meta-pwsh.outputs.tags }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -20,6 +20,10 @@
 # Host-based routing alternative: give each instance its own hostname
 # (hr.webjea.corp.com) with a plain `server { proxy_pass ... }` per name and drop
 # WebJEA__PathBase entirely - simpler if you control DNS.
+#
+# The image is the published one (linux/amd64 + linux/arm64). Pin a release with
+# WEBJEA_TAG in .env, e.g. WEBJEA_TAG=2100.0.0, or WEBJEA_TAG=alpha / beta to follow
+# a prerelease channel. Docker Hub mirror: markdomansky/webjea
 services:
   nginx:
     image: nginx:alpine
@@ -32,7 +36,7 @@ services:
       - webjea-finance
 
   webjea-hr:
-    image: webjea:latest
+    image: ghcr.io/markdomansky/webjea:${WEBJEA_TAG:-latest}
     environment:
       WebJEA__PathBase: /hr
       Authentication__Mode: Entra
@@ -47,7 +51,7 @@ services:
     restart: unless-stopped
 
   webjea-finance:
-    image: webjea:latest
+    image: ghcr.io/markdomansky/webjea:${WEBJEA_TAG:-latest}
     environment:
       WebJEA__PathBase: /finance
       Authentication__Mode: Entra

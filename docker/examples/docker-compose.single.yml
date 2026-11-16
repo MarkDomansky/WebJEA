@@ -1,17 +1,21 @@
 # Single WebJEA instance.
 #
-#   1. Build the image from the repo root:  docker build -f docker/Dockerfile -t webjea .
-#   2. Create an Entra app registration (docs/entra.md) and fill in the .env values
+#   1. Create an Entra app registration (docs/entra.md) and fill in the .env values
 #      referenced below (TENANT_ID, CLIENT_ID, WEBJEA_CLIENT_SECRET). For a certificate
 #      instead of a secret, use the commented ClientCredentials lines and ./certs mount
 #      (docs/docker.md).
-#   3. Put your webjea.json + scripts in ./scripts
-#   4. docker compose -f docker-compose.single.yml up -d
+#   2. Put your webjea.json + scripts in ./scripts
+#   3. docker compose -f docker-compose.single.yml up -d
+#
+# The image is the published one (linux/amd64 + linux/arm64). Pin a release with
+# WEBJEA_TAG in .env, e.g. WEBJEA_TAG=2100.0.0, or WEBJEA_TAG=alpha / beta to follow
+# a prerelease channel. Append -pwsh (e.g. latest-pwsh) for the troubleshooting
+# variant with an interactive shell. Docker Hub mirror: markdomansky/webjea
 #
 # Linux containers are Entra-only (Windows/AD auth needs a Windows host).
 services:
   webjea:
-    image: webjea:latest
+    image: ghcr.io/markdomansky/webjea:${WEBJEA_TAG:-latest}
     ports:
       - "8080:8080"            # front this with your TLS-terminating proxy in production
     environment:
